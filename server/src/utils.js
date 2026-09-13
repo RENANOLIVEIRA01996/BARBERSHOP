@@ -87,7 +87,10 @@ export async function getWorkingWindow(dateStr, barberId = null) {
   }
   const { rows } = await db.query('SELECT * FROM business_hours WHERE day_of_week = $1', [dow]);
   const row = rows[0];
-  if (!row || !row.active || !row.open_time || !row.close_time) return null;
+  // Sem registro nenhum (ex.: instalação nova com banco sem seed de horários),
+  // usa um expediente padrão para o calendário nunca ficar vazio.
+  if (!row) return { open: '08:00', close: '18:00' };
+  if (!row.active || !row.open_time || !row.close_time) return null;
   return { open: row.open_time, close: row.close_time };
 }
 

@@ -77,7 +77,7 @@ async function seedHours(client, henriqueId) {
     INSERT INTO barber_hours (barber_id, day_of_week, open_time, close_time, active)
     VALUES ($1, $2, $3, $4, $5)
   `;
-  // 0 = Domingo (fechado), 1 = Segunda ...
+  // 0 = Domingo (aberto), 1 = Segunda ...
   const week = [
     [1, '08:00', '18:00', 1],
     [2, '08:00', '18:00', 1],
@@ -85,7 +85,7 @@ async function seedHours(client, henriqueId) {
     [4, '08:00', '18:00', 1],
     [5, '08:00', '19:00', 1],
     [6, '08:00', '17:00', 1],
-    [0, null, null, 0],
+    [0, '08:00', '18:00', 1],
   ];
   for (const [dow, open, close, active] of week) {
     await client.query(insertHours, [dow, open, close, active]);

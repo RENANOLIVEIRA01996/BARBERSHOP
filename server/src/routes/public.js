@@ -79,14 +79,19 @@ router.get('/days', async (req, res) => {
   const out = [];
   const today = new Date();
   for (let i = 0; i < days; i++) {
-    const d = new Date(today);
-    d.setDate(d.getDate() + i);
-    const dateStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-    const win = await getWorkingWindow(dateStr, barber_id ? Number(barber_id) : null);
-    if (!win) continue;
-    if ((await getBlocksFor(dateStr)).some(b => b.allDay)) continue;
-    const r = await computeAvailableSlots(dateStr, Number(service_id), barber_id ? Number(barber_id) : null);
-    if (r.slots && r.slots.length) out.push(dateStr);
+    try {
+      const d = new Date(today);
+      d.setDate(d.getDate() + i);
+      const dateStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+      const win = await getWorkingWindow(dateStr, barber_id ? Number(barber_id) : null);
+      if (!win) continue; // dia sem expediente ativo
+      if ((await getBlocksFor(dateStr)).some(b => b.allDay)) continue;
+      const r = await computeAvailableSlots(dateStr, Number(service_id), barber_id ? Number(barber_id) : null);
+      if (r.slots && r.slots.length) out.push(dateStr);
+    } catch (err) {
+      // Um dia com erro não pode derrubar a lista inteira do calendário.
+      console.error('[days] erro ao calcular disponibilidade:', dateStr, err);
+    }
   }
   return ok(res, { days: out });
 });
