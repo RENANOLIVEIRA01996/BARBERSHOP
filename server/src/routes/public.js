@@ -226,6 +226,7 @@ router.post('/reviews', async (req, res) => {
     ['Nova avaliação', `${customer_name} avaliou com ${rate} estrelas`, 'review']);
 
   return ok(res, { review: rows[0] });
+});
 // GET /api/public/whatsapp — link automático para falar com a barbearia
 router.get('/whatsapp', async (req, res) => {
   const { rows } = await db.query(`SELECT ${PUBLIC_SHOP_FIELDS} FROM barbershops WHERE id = 1`);
