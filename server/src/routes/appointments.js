@@ -15,6 +15,7 @@ import {
   getBlocksFor,
   getBookedSlots,
 } from '../utils.js';
+import { invalidateAvailabilityCache } from '../availabilityCache.js';
 import { requireAuth } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -88,6 +89,7 @@ router.post('/', async (req, res) => {
     return fail(res, result.error, result.status || 409);
   }
 
+  invalidateAvailabilityCache();
   const { rows } = await db.query(`${JOIN} WHERE a.id = $1`, [result.id]);
   const full = rows[0];
   return ok(res, { appointment: full });
@@ -171,6 +173,7 @@ router.put('/:id', async (req, res) => {
 
   const updatedResult = await db.query(`${JOIN} WHERE a.id = $1`, [Number(req.params.id)]);
   if (updatedResult.rowCount === 0) return fail(res, 'Falha ao atualizar agendamento.', 500);
+  invalidateAvailabilityCache();
   return ok(res, { appointment: updatedResult.rows[0] });
 });
 
@@ -187,6 +190,7 @@ router.delete('/:id', async (req, res) => {
     await updateCustomerStats(existing.customer_id);
   });
 
+  invalidateAvailabilityCache();
   return ok(res, { deleted: true, id: Number(req.params.id) });
 });
 
@@ -232,6 +236,7 @@ router.patch('/:id/status', async (req, res) => {
 
   const updatedResult = await db.query(`${JOIN} WHERE a.id = $1`, [Number(req.params.id)]);
   if (updatedResult.rowCount === 0) return fail(res, 'Falha ao atualizar agendamento.', 500);
+  invalidateAvailabilityCache();
   return ok(res, { appointment: updatedResult.rows[0] });
 });
 // ---------------------------------------------------------------
@@ -253,9 +258,9 @@ export async function createAppointment(data) {
     if (barberResult.rowCount === 0) return { error: 'Barbeiro não encontrado.', status: 400 };
   }
 
-  // Verificar horário de funcionamento
+  // Verificar horário de funcionamento (interseção barbearia + barbeiro)
   const win = await getWorkingWindow(date, barber_id ?? null);
-  if (!win) return { error: 'Barbearia fechada nesta data.', status: 400 };
+  if (!win) return { error: 'Barbearia fechada ou barbeiro sem horário nesta data.', status: 400 };
 
   const startMin = timeToMin(start_time);
   const endMin = startMin + service.duration_minutes;
@@ -344,9 +349,9 @@ async function isSlotFree(date, start_time, end_time, barber_id, exclude_id = nu
   const startMin = timeToMin(start_time);
   const endMin = timeToMin(end_time);
 
-  // Verificar horário de funcionamento
+  // Verificar horário de funcionamento (interseção barbearia + barbeiro)
   const win = await getWorkingWindow(date, barber_id);
-  if (!win) return { available: false, error: 'Barbearia fechada nesta data.' };
+  if (!win) return { available: false, error: 'Barbearia fechada ou barbeiro sem horário nesta data.' };
 
   const openMin = timeToMin(win.open);
   const closeMin = timeToMin(win.close);

@@ -7,6 +7,7 @@ import {
   ok, fail, getSetting,
   computeAvailableSlots, computeAvailableDays, waLink,
 } from '../utils.js';
+import { getCachedDays, setCachedDays, invalidateAvailabilityCache } from '../availabilityCache.js';
 import { createAppointment, fetchAppointmentByCode } from './appointments.js';
 
 const router = express.Router();
@@ -23,24 +24,14 @@ function safeJson(value, fallback) {
 
 function whatsanitize(w) { return String(w || '').replace(/\D/g, ''); }
 
-// Cache simples em memória para a lista de dias (TTL curto).
-// Evita recomputar a grade inteira a cada troca de mês/serviço no calendário.
-const daysCache = new Map();
-const DAYS_CACHE_TTL_MS = 60_000;
-
 async function cachedDays(serviceId, barberId, days) {
   const key = `${serviceId}|${barberId || ''}|${days}`;
-  const hit = daysCache.get(key);
-  if (hit && Date.now() - hit.t < DAYS_CACHE_TTL_MS) return hit.days;
+  const hit = getCachedDays(key);
+  if (hit) return hit;
   const result = await computeAvailableDays(serviceId, barberId, days);
   const list = result.error ? null : (result.days || []);
-  if (list) daysCache.set(key, { t: Date.now(), days: list });
+  if (list) setCachedDays(key, list);
   return list;
-}
-
-/** Invalida tudo no cache de dias (ao criar/cancelar agendamento). */
-function invalidateDaysCache() {
-  daysCache.clear();
 }
 
 // GET /api/public/shop — tudo que a página pública precisa
@@ -180,7 +171,7 @@ router.post('/appointments', async (req, res) => {
     status: 'scheduled',
   });
   if (appt.error) return fail(res, appt.error, 409);
-  invalidateDaysCache();
+  invalidateAvailabilityCache();
 
   await db.query(
     'INSERT INTO notifications (title, message, type) VALUES ($1, $2, $3)',
@@ -213,7 +204,7 @@ router.post('/appointments/:code/action', async (req, res) => {
     }
     await db.query("UPDATE appointments SET status = 'cancelled', updated_at = NOW() WHERE id = $1", [appt.id]);
     await db.query('DELETE FROM payments WHERE appointment_id = $1', [appt.id]);
-    invalidateDaysCache();
+    invalidateAvailabilityCache();
     return ok(res, { cancelled: true, code: appt.code });
   }
   if (action === 'confirm') {

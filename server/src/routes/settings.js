@@ -4,6 +4,7 @@
 import express from 'express';
 import { db } from '../db.js';
 import { ok, fail, getSetting, setSetting } from '../utils.js';
+import { invalidateAvailabilityCache } from '../availabilityCache.js';
 import { requireAuth } from '../middleware/auth.js';
 import { DEFAULT_SETTINGS } from '../seed.js';
 
@@ -26,6 +27,8 @@ router.put('/', async (req, res) => {
       await setSetting(k, v);
     }
   }
+  // Intervalo/antecedência etc. influenciam a grade de horários
+  invalidateAvailabilityCache();
   const { rows } = await db.query('SELECT key, value FROM settings');
   const settings = {};
   for (const r of rows) settings[r.key] = r.value;

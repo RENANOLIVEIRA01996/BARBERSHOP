@@ -4,6 +4,7 @@
 import express from 'express';
 import { db } from '../db.js';
 import { ok, fail, slugify } from '../utils.js';
+import { invalidateAvailabilityCache } from '../availabilityCache.js';
 import { requireAuth } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -52,6 +53,7 @@ router.post('/', async (req, res) => {
   ]);
   const barber = rows[0];
   barber.specialties = safeJson(barber.specialties, []);
+  invalidateAvailabilityCache();
   return ok(res, { barber });
 });
 
@@ -81,6 +83,7 @@ router.put('/:id', async (req, res) => {
   const { rows: updatedRows } = await db.query('SELECT * FROM barbers WHERE id = $1', [barber.id]);
   const updated = updatedRows[0];
   updated.specialties = safeJson(updated.specialties, []);
+  invalidateAvailabilityCache();
   return ok(res, { barber: updated });
 });
 
@@ -93,6 +96,7 @@ router.delete('/:id', async (req, res) => {
   const used = Number(usedRows[0].n);
   if (used > 0) return fail(res, 'Este barbeiro possui agendamentos. Desative em vez de excluir.', 409);
   await db.query('DELETE FROM barbers WHERE id = $1', [barber.id]);
+  invalidateAvailabilityCache();
   return ok(res, { deleted: true });
 });
 
@@ -109,6 +113,8 @@ router.put('/:id/hours', async (req, res) => {
       VALUES ($1, $2, $3, $4, $5)
     `, [barber.id, h.day_of_week, h.open_time || null, h.close_time || null, h.active ? 1 : 0]);
   }
+  // Horários do barbeiro mudaram -> disponibilidade pública deve acompanhar já
+  invalidateAvailabilityCache();
   const { rows: finalHours } = await db.query('SELECT * FROM barber_hours WHERE barber_id = $1', [barber.id]);
   return ok(res, { hours: finalHours });
 });

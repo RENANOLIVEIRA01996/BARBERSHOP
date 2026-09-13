@@ -121,7 +121,7 @@ function Agendar() {
       setLoading(true);
       try {
         const res = await fetch(
-          `${API_URL}/api/public/availability?service_id=${selectedServiceId}&date=${selectedDate}`
+          `${API_URL}/api/public/availability?service_id=${selectedServiceId}&date=${selectedDate}&barber_id=${selectedBarberId || ''}`
         );
         if (!res.ok) throw new Error('Falha ao verificar horários.');
         const data = await res.json();

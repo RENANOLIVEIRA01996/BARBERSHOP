@@ -4,6 +4,7 @@
 import express from 'express';
 import { db } from '../db.js';
 import { ok, fail } from '../utils.js';
+import { invalidateAvailabilityCache } from '../availabilityCache.js';
 import { requireAuth } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -33,6 +34,8 @@ router.put('/', async (req, res) => {
       h.active ? 1 : 0
     ]);
   }
+  // Horário da barbearia mudou -> refletir imediatamente na agenda pública
+  invalidateAvailabilityCache();
   const { rows } = await db.query('SELECT * FROM business_hours ORDER BY day_of_week');
   return ok(res, { hours: rows });
 });
@@ -56,6 +59,9 @@ router.put('/barber/:barberId', async (req, res) => {
       VALUES ($1, $2, $3, $4, $5)
     `, [barberId, Number(h.day_of_week), h.open_time || null, h.close_time || null, h.active ? 1 : 0]);
   }
+  // Horários do barbeiro mudaram (criado/alterado/desativado/removido)
+  // -> invalidar imediatamente a disponibilidade pública
+  invalidateAvailabilityCache();
   const { rows } = await db.query('SELECT * FROM barber_hours WHERE barber_id = $1 ORDER BY day_of_week', [barberId]);
   return ok(res, { hours: rows });
 });

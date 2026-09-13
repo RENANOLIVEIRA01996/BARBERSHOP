@@ -4,6 +4,7 @@
 import express from 'express';
 import { db } from '../db.js';
 import { ok, fail, timeToMin, minToTime } from '../utils.js';
+import { invalidateAvailabilityCache } from '../availabilityCache.js';
 import { requireAuth } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -46,6 +47,7 @@ router.post('/blocked', async (req, res) => {
     all_day ? null : (end_time || minToTime(timeToMin(start_time) + 60)),
     all_day ? 1 : 0, is_recurring ? 1 : 0, reason || null
   ]);
+  invalidateAvailabilityCache();
   return ok(res, { blocked: rows[0] });
 });
 
@@ -69,12 +71,14 @@ router.put('/blocked/:id', async (req, res) => {
     reason !== undefined ? reason : item.reason,
     item.id
   ]);
+  invalidateAvailabilityCache();
   return ok(res, { blocked: updatedRows[0] });
 });
 
 // DELETE /api/blocked/:id
 router.delete('/blocked/:id', async (req, res) => {
   await db.query('DELETE FROM blocked_times WHERE id = $1', [req.params.id]);
+  invalidateAvailabilityCache();
   return ok(res, { deleted: true });
 });
 
@@ -105,6 +109,7 @@ router.post('/holidays', async (req, res) => {
     INSERT INTO holidays (title, date, type, recurring) VALUES ($1, $2, $3, $4)
     RETURNING *
   `, [title, date, type || 'holiday', recurring ? 1 : 0]);
+  invalidateAvailabilityCache();
   return ok(res, { holiday: rows[0] });
 });
 
@@ -118,12 +123,14 @@ router.put('/holidays/:id', async (req, res) => {
     UPDATE holidays SET title = $1, date = $2, type = $3, recurring = $4 WHERE id = $5
     RETURNING *
   `, [title || item.title, date || item.date, type || item.type, recurring !== undefined ? (recurring ? 1 : 0) : item.recurring, item.id]);
+  invalidateAvailabilityCache();
   return ok(res, { holiday: updatedRows[0] });
 });
 
 // DELETE /api/holidays/:id
 router.delete('/holidays/:id', async (req, res) => {
   await db.query('DELETE FROM holidays WHERE id = $1', [req.params.id]);
+  invalidateAvailabilityCache();
   return ok(res, { deleted: true });
 });
 

@@ -4,6 +4,7 @@
 import express from 'express';
 import { db } from '../db.js';
 import { ok, fail, slugify } from '../utils.js';
+import { invalidateAvailabilityCache } from '../availabilityCache.js';
 import { requireAuth } from '../middleware/auth.js';
 
 const router = express.Router();
@@ -53,6 +54,7 @@ router.post('/', async (req, res) => {
     photo || null, status || 'active', pos
   ]);
   const svc = rows[0];
+  invalidateAvailabilityCache();
   return ok(res, { service: svc });
 });
 
@@ -80,6 +82,8 @@ router.put('/:id', async (req, res) => {
     position !== undefined ? position : svc.position,
     svc.id
   ]);
+  // Duração/status do serviço afeta a grade -> invalidar disponibilidade
+  invalidateAvailabilityCache();
   const { rows: updatedRows } = await db.query('SELECT * FROM services WHERE id = $1', [svc.id]);
   return ok(res, { service: updatedRows[0] });
 });
@@ -93,6 +97,7 @@ router.delete('/:id', async (req, res) => {
   const used = Number(usedRows[0].n);
   if (used > 0) return fail(res, 'Este serviço possui agendamentos. Desative em vez de excluir.', 409);
   await db.query('DELETE FROM services WHERE id = $1', [svc.id]);
+  invalidateAvailabilityCache();
   return ok(res, { deleted: true });
 });
 
