@@ -66,6 +66,8 @@ router.get('/shop', async (req, res) => {
       cancelDeadlineHours: await getSetting('booking.cancel_deadline_hours', 24),
     },
   });
+});
+
 // GET /api/public/days?service_id=&barber_id=&days=30 — datas com horário
 router.get('/days', async (req, res) => {
   const { service_id, barber_id } = req.query;
@@ -87,7 +89,6 @@ router.get('/days', async (req, res) => {
     if (r.slots && r.slots.length) out.push(dateStr);
   }
   return ok(res, { days: out });
-});
 });
 // GET /api/public/availability?service_id=&date=&barber_id=
 router.get('/availability', async (req, res) => {
@@ -118,6 +119,8 @@ router.get('/availability', async (req, res) => {
     });
   }
   return ok(res, { slots, duration: result.duration, date, service_id });
+});
+
 // POST /api/public/appointments — agendamento do cliente
 router.post('/appointments', async (req, res) => {
   const { service_id, barber_id, date, start_time, name, whatsapp, email, notes } = req.body || {};
@@ -172,7 +175,6 @@ router.post('/appointments', async (req, res) => {
 
   const full = await fetchAppointmentByCode(null, appt.id);
   return ok(res, { appointment: full });
-});
 });
 // GET /api/public/appointments/:code — dados para confirmação
 router.get('/appointments/:code', async (req, res) => {

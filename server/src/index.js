@@ -89,6 +89,19 @@ app.use('/api/upload', uploadRoutes);
 // ---------- 404 API ----------
 app.use('/api', (req, res) => res.status(404).json({ ok: false, message: 'Rota não encontrada.' }));
 
+// ---------- frontend static (produção) ----------
+if (process.env.NODE_ENV === 'production') {
+  const frontendPath = path.join(__dirname, '..', '..', 'web', 'dist');
+  // Verifica se o diretório de build do frontend existe
+  if (fs.existsSync(frontendPath)) {
+    app.use(express.static(frontendPath));
+    // Para rotas do lado do cliente (React Router), retorna o index.html
+    app.get('*', (req, res) => {
+      res.sendFile(path.join(frontendPath, 'index.html'));
+    });
+  }
+}
+
 // ---------- erro ----------
 // eslint-disable-next-line no-unused-vars
 app.use((err, req, res, next) => {

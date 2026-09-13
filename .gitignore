@@ -37,3 +37,6 @@ pnpm-debug.log*
 *.njsproj
 *.sln
 *.sw?
+
+# Frontend dependencies
+/web/node_modules
