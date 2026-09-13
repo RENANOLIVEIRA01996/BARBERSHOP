@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import NavBar from '../components/layout/NavBar';
 import Footer from '../components/layout/Footer';
+import { Helmet } from 'react-helmet';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -96,7 +97,22 @@ function Home() {
 
   return (
     <>
-      <NavBar />
+      <Helmet>
+        <title>Henrique Barber - Barbearia Premium</title>
+        <meta name="description" content="Agende seu horário online na Henrique Barber. Barbearia premium com atendimento personalizado, barbeiros qualificados e produtos de alta qualidade." />
+        {/* Open Graph / Facebook */}
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content="https://henriquebarber.com.br/" />
+        <meta property="og:title" content="Henrique Barber - Barbearia Premium" />
+        <meta property="og:description" content="Agende seu horário online na Henrique Barber. Barbearia premium com atendimento personalizado, barbeiros qualificados e produtos de alta qualidade." />
+        <meta property="og:image" content="https://henriquebarber.com.br/assets/banner.jpg" />
+        {/* Twitter */}
+        <meta property="twitter:card" content="summary_large_image" />
+        <meta property="twitter:url" content="https://henriquebarber.com.br/" />
+        <meta property="twitter:title" content="Henrique Barber - Barbearia Premium" />
+        <meta property="twitter:description" content="Agende seu horário online na Henrique Barber. Barbearia premium com atendimento personalizado, barbeiros qualificados e produtos de alta qualidade." />
+        <meta property="twitter:image" content="https://henriquebarber.com.br/assets/banner.jpg" />
+      </Helmet>
 
       <main className="lp">
         {/* ============ HERO ============ */}
