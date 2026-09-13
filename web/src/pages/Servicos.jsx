@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import NavBar from '../components/layout/NavBar';
 import Footer from '../components/layout/Footer';
+import { Helmet } from 'react-helmet';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -44,6 +45,22 @@ function Servicos() {
 
   return (
     <>
+      <Helmet>
+        <title>Serviços - Henrique Barber</title>
+        <meta name="description" content="Conheça os serviços premium oferecidos pela Henrique Barber: cortes de cabelo, barba, sobrancelha, skin care e pacotes completos." />
+        {/* Open Graph / Facebook */}
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content="https://henriquebarber.com.br/servicos" />
+        <meta property="og:title" content="Serviços - Henrique Barber" />
+        <meta property="og:description" content="Conheça os serviços premium oferecidos pela Henrique Barber: cortes de cabelo, barba, sobrancelha, skin care e pacotes completos." />
+        <meta property="og:image" content="https://henriquebarber.com.br/assets/banner-servicos.jpg" />
+        {/* Twitter */}
+        <meta property="twitter:card" content="summary_large_image" />
+        <meta property="twitter:url" content="https://henriquebarber.com.br/servicos" />
+        <meta property="twitter:title" content="Serviços - Henrique Barber" />
+        <meta property="twitter:description" content="Conheça os serviços premium oferecidos pela Henrique Barber: cortes de cabelo, barba, sobrancelha, skin care e pacotes completos." />
+        <meta property="twitter:image" content="https://henriquebarber.com.br/assets/banner-servicos.jpg" />
+      </Helmet>
       <NavBar />
       <div className="container">
       <section className="page-header">

@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import NavBar from '../components/layout/NavBar';
 import Footer from '../components/layout/Footer';
+import { Helmet } from 'react-helmet';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -44,7 +45,22 @@ function Barbeiros() {
 
   return (
     <>
-      <NavBar />
+      <Helmet>
+        <title>Barbeiros - Henrique Barber</title>
+        <meta name="description" content="Conheça os barbeiros da Henrique Barber, profissionais qualificados especializados em cortes de cabelo, barba e estilo masculino." />
+        {/* Open Graph / Facebook */}
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content="https://henriquebarber.com.br/barbeiros" />
+        <meta property="og:title" content="Barbeiros - Henrique Barber" />
+        <meta property="og:description" content="Conheça os barbeiros da Henrique Barber, profissionais qualificados especializados em cortes de cabelo, barba e estilo masculino." />
+        <meta property="og:image" content="https://henriquebarber.com.br/assets/banner-barbeiros.jpg" />
+        {/* Twitter */}
+        <meta property="twitter:card" content="summary_large_image" />
+        <meta property="twitter:url" content="https://henriquebarber.com.br/barbeiros" />
+        <meta property="twitter:title" content="Barbeiros - Henrique Barber" />
+        <meta property="twitter:description" content="Conheça os barbeiros da Henrique Barber, profissionais qualificados especializados em cortes de cabelo, barba e estilo masculino." />
+        <meta property="twitter:image" content="https://henriquebarber.com.br/assets/banner-barbeiros.jpg" />
+      </Helmet>
       <div className="container">
       <section className="page-header">
         <h1>Nossos Barbeiros</h1>

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import NavBar from '../components/layout/NavBar';
 import Footer from '../components/layout/Footer';
+import { Helmet } from 'react-helmet';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 

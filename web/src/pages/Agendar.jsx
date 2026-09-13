@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import NavBar from '../components/layout/NavBar';
 import Footer from '../components/layout/Footer';
+import { Helmet } from 'react-helmet';
 
 const API_URL = import.meta.env.VITE_API_URL || '';
 
@@ -310,6 +311,22 @@ function Agendar() {
 
   return (
     <>
+      <Helmet>
+        <title>Agendar horário - Henrique Barber</title>
+        <meta name="description" content="Agende seu horário online na Henrique Barber. Escolha o serviço, barbeiro, data e horário de forma rápida e segura." />
+        {/* Open Graph / Facebook */}
+        <meta property="og:type" content="website" />
+        <meta property="og:url" content="https://henriquebarber.com.br/agendar" />
+        <meta property="og:title" content="Agendar horário - Henrique Barber" />
+        <meta property="og:description" content="Agende seu horário online na Henrique Barber. Escolha o serviço, barbeiro, data e horário de forma rápida e segura." />
+        <meta property="og:image" content="https://henriquebarber.com.br/assets/banner-agendar.jpg" />
+        {/* Twitter */}
+        <meta property="twitter:card" content="summary_large_image" />
+        <meta property="twitter:url" content="https://henriquebarber.com.br/agendar" />
+        <meta property="twitter:title" content="Agendar horário - Henrique Barber" />
+        <meta property="twitter:description" content="Agende seu horário online na Henrique Barber. Escolha o serviço, barbeiro, data e horário de forma rápida e segura." />
+        <meta property="twitter:image" content="https://henriquebarber.com.br/assets/banner-agendar.jpg" />
+      </Helmet>
       <NavBar />
       <div className="container">
       {/* HERO */}
