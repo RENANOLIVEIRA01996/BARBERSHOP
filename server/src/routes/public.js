@@ -4,8 +4,8 @@
 import express from 'express';
 import { db } from '../db.js';
 import {
-  ok, fail, getWorkingWindow, getBlocksFor, getSetting,
-  computeAvailableSlots, toYMD, pad, waLink,
+  ok, fail, getSetting,
+  computeAvailableSlots, computeAvailableDays, waLink,
 } from '../utils.js';
 import { createAppointment, fetchAppointmentByCode } from './appointments.js';
 
@@ -22,6 +22,26 @@ function safeJson(value, fallback) {
 }
 
 function whatsanitize(w) { return String(w || '').replace(/\D/g, ''); }
+
+// Cache simples em memória para a lista de dias (TTL curto).
+// Evita recomputar a grade inteira a cada troca de mês/serviço no calendário.
+const daysCache = new Map();
+const DAYS_CACHE_TTL_MS = 60_000;
+
+async function cachedDays(serviceId, barberId, days) {
+  const key = `${serviceId}|${barberId || ''}|${days}`;
+  const hit = daysCache.get(key);
+  if (hit && Date.now() - hit.t < DAYS_CACHE_TTL_MS) return hit.days;
+  const result = await computeAvailableDays(serviceId, barberId, days);
+  const list = result.error ? null : (result.days || []);
+  if (list) daysCache.set(key, { t: Date.now(), days: list });
+  return list;
+}
+
+/** Invalida tudo no cache de dias (ao criar/cancelar agendamento). */
+function invalidateDaysCache() {
+  daysCache.clear();
+}
 
 // GET /api/public/shop — tudo que a página pública precisa
 router.get('/shop', async (req, res) => {
@@ -72,28 +92,16 @@ router.get('/shop', async (req, res) => {
 router.get('/days', async (req, res) => {
   const { service_id, barber_id } = req.query;
   const days = Math.min(90, Number(req.query.days) || 30);
-  const { rows: svcRows } = await db.query('SELECT * FROM services WHERE id = $1 AND status = $2', [service_id, 'active']);
-  const svc = svcRows[0];
-  if (!svc) return fail(res, 'Serviço indisponível.', 404);
+  if (!service_id) return fail(res, 'Informe o serviço.');
 
-  const out = [];
-  const today = new Date();
-  for (let i = 0; i < days; i++) {
-    try {
-      const d = new Date(today);
-      d.setDate(d.getDate() + i);
-      const dateStr = `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
-      const win = await getWorkingWindow(dateStr, barber_id ? Number(barber_id) : null);
-      if (!win) continue; // dia sem expediente ativo
-      if ((await getBlocksFor(dateStr)).some(b => b.allDay)) continue;
-      const r = await computeAvailableSlots(dateStr, Number(service_id), barber_id ? Number(barber_id) : null);
-      if (r.slots && r.slots.length) out.push(dateStr);
-    } catch (err) {
-      // Um dia com erro não pode derrubar a lista inteira do calendário.
-      console.error('[days] erro ao calcular disponibilidade:', dateStr, err);
-    }
+  try {
+    const list = await cachedDays(Number(service_id), barber_id ? Number(barber_id) : null, days);
+    if (list === null) return fail(res, 'Serviço indisponível.', 404);
+    return ok(res, { days: list });
+  } catch (err) {
+    console.error('[days] erro ao calcular dias disponíveis:', err);
+    return fail(res, 'Não foi possível carregar os dias disponíveis.', 500);
   }
-  return ok(res, { days: out });
 });
 // GET /api/public/availability?service_id=&date=&barber_id=
 router.get('/availability', async (req, res) => {
@@ -172,6 +180,7 @@ router.post('/appointments', async (req, res) => {
     status: 'scheduled',
   });
   if (appt.error) return fail(res, appt.error, 409);
+  invalidateDaysCache();
 
   await db.query(
     'INSERT INTO notifications (title, message, type) VALUES ($1, $2, $3)',
@@ -204,6 +213,7 @@ router.post('/appointments/:code/action', async (req, res) => {
     }
     await db.query("UPDATE appointments SET status = 'cancelled', updated_at = NOW() WHERE id = $1", [appt.id]);
     await db.query('DELETE FROM payments WHERE appointment_id = $1', [appt.id]);
+    invalidateDaysCache();
     return ok(res, { cancelled: true, code: appt.code });
   }
   if (action === 'confirm') {

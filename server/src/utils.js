@@ -181,6 +181,189 @@ export async function computeAvailableSlots(dateStr, serviceId, barberId = null)
   return { slots: uniq, duration };
 }
 
+function normalizeDateKey(value) {
+  if (!value) return '';
+  if (value instanceof Date) return toYMD(value);
+  return String(value).slice(0, 10);
+}
+
+/**
+ * Calcula os dias com pelo menos um horário livre para um serviço/barbeiro.
+ * Otimizado: busca todos os dados de apoio (horários, bloqueios, feriados,
+ * agendamentos) em poucas queries e calcula a grade em memória — para 60 dias
+ * isso é dezenas de vezes mais rápido que o loop sequencial antigo.
+ */
+export async function computeAvailableDays(serviceId, barberId = null, days = 60) {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const end = new Date(today);
+  end.setDate(end.getDate() + (days - 1));
+  const todayY = toYMD(today);
+  const endY = toYMD(end);
+
+  const [
+    svcRes,
+    hoursRes,
+    barberHoursRes,
+    barbersRes,
+    holidaysRes,
+    blocksRes,
+    apptsRes,
+    intervalSetting,
+  ] = await Promise.all([
+    db.query('SELECT id, duration_minutes FROM services WHERE id = $1 AND status = $2', [serviceId, 'active']),
+    db.query('SELECT * FROM business_hours'),
+    db.query('SELECT * FROM barber_hours'),
+    barberId
+      ? db.query('SELECT id FROM barbers WHERE id = $1 AND status = $2', [barberId, 'active'])
+      : db.query('SELECT id FROM barbers WHERE status = $1', ['active']),
+    db.query('SELECT * FROM holidays'),
+    db.query('SELECT * FROM blocked_times'),
+    db.query(
+      `SELECT date, barber_id, start_time, end_time FROM appointments
+       WHERE date >= $1 AND date <= $2 AND status NOT IN ('cancelled', 'no_show')`,
+      [todayY, endY]
+    ),
+    getSetting('booking.slot_interval_minutes', 30),
+  ]);
+
+  const svc = svcRes.rows[0];
+  if (!svc) return { error: 'Serviço indisponível.' };
+
+  const barberIds = barbersRes.rows.map((b) => Number(b.id));
+  if (!barberIds.length) return { days: [] };
+
+  const interval = Number(intervalSetting) || 30;
+  const duration = Number(svc.duration_minutes) || 30;
+
+  // Índices locais (day_of_week -> linha)
+  const bhByDow = new Map();
+  for (const h of hoursRes.rows) bhByDow.set(Number(h.day_of_week), h);
+  const bhBarber = new Map(); // barber_id -> (day_of_week -> linha)
+  for (const h of barberHoursRes.rows) {
+    if (!bhBarber.has(Number(h.barber_id))) bhBarber.set(Number(h.barber_id), new Map());
+    bhBarber.get(Number(h.barber_id)).set(Number(h.day_of_week), h);
+  }
+
+  // Bloqueios/feriados: pré-computar por data para evitar O(n) no loop
+  const blocksByDate = new Map(); // dateStr -> Array<{start_time, end_time, allDay}>
+  const addBlock = (dateStr, block) => {
+    if (!blocksByDate.has(dateStr)) blocksByDate.set(dateStr, []);
+    blocksByDate.get(dateStr).push(block);
+  };
+
+  // Feriados
+  for (const h of holidaysRes.rows) {
+    const hDate = normalizeDateKey(h.date);
+    if (!hDate) continue;
+    const hDow = new Date(hDate + 'T12:00:00').getDay();
+    for (let i = 0; i < days; i++) {
+      const d = new Date(today);
+      d.setDate(d.getDate() + i);
+      const dateStr = toYMD(d);
+      if (hDate === dateStr || (h.recurring && hDow === d.getDay())) {
+        addBlock(dateStr, { start_time: '00:00', end_time: '24:00' });
+      }
+    }
+  }
+
+  // Bloqueios de horário
+  for (const bt of blocksRes.rows) {
+    const btDate = normalizeDateKey(bt.date);
+    if (!btDate) continue;
+    const btDow = new Date(btDate + 'T12:00:00').getDay();
+    for (let i = 0; i < days; i++) {
+      const d = new Date(today);
+      d.setDate(d.getDate() + i);
+      const dateStr = toYMD(d);
+      if (btDate === dateStr || (bt.is_recurring && btDow === d.getDay())) {
+        const st = bt.all_day ? '00:00' : bt.start_time;
+        const et = bt.all_day ? '24:00' : bt.end_time;
+        addBlock(dateStr, { start_time: st, end_time: et });
+      }
+    }
+  }
+
+  // Datas com bloqueio o dia inteiro (forAll-day)
+  const allDayBlockDates = new Set();
+  for (const [ds, blks] of blocksByDate) {
+    if (blks.some((b) => b.end_time === '24:00')) allDayBlockDates.add(ds);
+  }
+
+  // Agendamentos já marcados indexados por data+barbeiro
+  const bookedByDayBarber = new Map(); // `${date}|${barber_id}` -> array
+  for (const a of apptsRes.rows) {
+    const key = `${toYMD(new Date(a.date))}|${a.barber_id}`;
+    if (!bookedByDayBarber.has(key)) bookedByDayBarber.set(key, []);
+    bookedByDayBarber.get(key).push(a);
+  }
+
+  const out = [];
+  for (let i = 0; i < days; i++) {
+    const d = new Date(today);
+    d.setDate(d.getDate() + i);
+    const dateStr = toYMD(d);
+    const dow = d.getDay();
+
+    if (allDayBlockDates.has(dateStr)) continue;
+
+    // Janela de funcionamento: barber_hours (se ativo) senão business_hours
+    let window = null;
+    for (const bId of barberIds) {
+      const bMap = bhBarber.get(bId);
+      const bh = bMap && bMap.get(dow);
+      if (bh && bh.active && bh.open_time && bh.close_time) {
+        window = { open: bh.open_time, close: bh.close_time };
+        break;
+      }
+    }
+    if (!window) {
+      const row = bhByDow.get(dow);
+      if (!row) {
+        window = { open: '08:00', close: '18:00' };
+      } else if (!row.active || !row.open_time || !row.close_time) {
+        continue; // fechado no dia
+      } else {
+        window = { open: row.open_time, close: row.close_time };
+      }
+    }
+
+    const openMin = timeToMin(window.open);
+    const closeMin = timeToMin(window.close);
+    if (openMin == null || closeMin == null || openMin + duration > closeMin) continue;
+
+    const dayBlocks = blocksByDate.get(dateStr) || [];
+
+    let hasSlot = false;
+    for (const bId of barberIds) {
+      // Janela individual do barbeiro (pode diferir da business_hours)
+      let bWin = window;
+      const bMap = bhBarber.get(bId);
+      const bh = bMap && bMap.get(dow);
+      if (bh && bh.active && bh.open_time && bh.close_time) {
+        bWin = { open: bh.open_time, close: bh.close_time };
+      }
+      const bOpen = timeToMin(bWin.open);
+      const bClose = timeToMin(bWin.close);
+      if (bOpen == null || bClose == null || bOpen + duration > bClose) continue;
+
+      const booked = bookedByDayBarber.get(`${dateStr}|${bId}`) || [];
+      for (let t = bOpen; t + duration <= bClose; t += interval) {
+        const start = minToTime(t);
+        const end = minToTime(t + duration);
+        if (overlapsAny(start, end, booked)) continue;
+        if (overlapsAny(start, end, dayBlocks)) continue;
+        hasSlot = true;
+        break;
+      }
+      if (hasSlot) break;
+    }
+    if (hasSlot) out.push(dateStr);
+  }
+
+  return { days: out };
+}
+
 function overlapsAny(start, end, ranges) {
   const s = timeToMin(start), e = timeToMin(end);
   return ranges.some((r) => {
