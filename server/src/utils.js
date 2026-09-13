@@ -228,7 +228,6 @@ export async function computeAvailableDays(serviceId, barberId = null, days = 60
 
   const [
     svcRes,
-    hoursRes,
     barberHoursRes,
     barbersRes,
     holidaysRes,
@@ -237,7 +236,6 @@ export async function computeAvailableDays(serviceId, barberId = null, days = 60
     intervalSetting,
   ] = await Promise.all([
     db.query('SELECT id, duration_minutes FROM services WHERE id = $1 AND status = $2', [serviceId, 'active']),
-    db.query('SELECT * FROM business_hours'),
     db.query('SELECT * FROM barber_hours'),
     barberId
       ? db.query('SELECT id FROM barbers WHERE id = $1 AND status = $2', [barberId, 'active'])
@@ -261,9 +259,7 @@ export async function computeAvailableDays(serviceId, barberId = null, days = 60
   const interval = Number(intervalSetting) || 30;
   const duration = Number(svc.duration_minutes) || 30;
 
-  // Índices locais (day_of_week -> linha)
-  const bhByDow = new Map();
-  for (const h of hoursRes.rows) bhByDow.set(Number(h.day_of_week), h);
+  // Índice local: barber_id -> (day_of_week -> linha)
   const bhBarber = new Map(); // barber_id -> (day_of_week -> linha)
   for (const h of barberHoursRes.rows) {
     if (!bhBarber.has(Number(h.barber_id))) bhBarber.set(Number(h.barber_id), new Map());
@@ -332,25 +328,9 @@ export async function computeAvailableDays(serviceId, barberId = null, days = 60
 
     if (allDayBlockDates.has(dateStr)) continue;
 
-    // Limite geral: business_hours (a barbearia controla o teto máximo).
-    // Nota: quando barberId é fornecido, este limite NÃO se aplica ao
-    // barbeiro específico — é usado apenas na consulta geral (sem barberId).
-    const shopRow = bhByDow.get(dow);
-    let shopOpenMin = 8 * 60;  // bootstrap p/ instalação sem registro de horário
-    let shopCloseMin = 18 * 60;
-    if (shopRow) {
-      // Existe registro e a barbearia está fechada no dia.
-      // Só pular quando NÃO há barbeiro específico.
-      if (!shopRow.active || !shopRow.open_time || !shopRow.close_time) {
-        if (!barberId) continue;
-      } else {
-        shopOpenMin = timeToMin(shopRow.open_time);
-        shopCloseMin = timeToMin(shopRow.close_time);
-        if (shopOpenMin == null || shopCloseMin == null) {
-          if (!barberId) continue;
-        }
-      }
-    }
+    // LIMITE DE BARBEARIA NÃO SE APLICA:
+    // A disponibilidade segue 100% o horário configurado de cada barbeiro
+    // (barber_hours). business_hours é usado apenas para exibição pública.
 
     const dayBlocks = blocksByDate.get(dateStr) || [];
 
@@ -362,19 +342,9 @@ export async function computeAvailableDays(serviceId, barberId = null, days = 60
       const bh = bMap && bMap.get(dow);
       if (!bh || !bh.active || !bh.open_time || !bh.close_time) continue;
 
-      // Se temos um barbeiro específico (barberId fornecido na função),
-      // ignoramos o horário da barbearia e usamos exclusivamente o horário do barbeiro.
-      // Caso contrário (consultando disponibilidade geral), respeitamos o horário da barbearia como limite.
-      let bOpen, bClose;
-      if (barberId) {
-        // Barber específico: usar exclusivamente o horário do barbeiro
-        bOpen = timeToMin(bh.open_time);
-        bClose = timeToMin(bh.close_time);
-      } else {
-        // Consulta geral: interseção entre horário do barbeiro e da barbearia
-        bOpen = Math.max(shopOpenMin, timeToMin(bh.open_time));
-        bClose = Math.min(shopCloseMin, timeToMin(bh.close_time));
-      }
+      // Barbeiro é a fonte única: disponibilidade segue exclusivamente o horário dele
+      const bOpen = timeToMin(bh.open_time);
+      const bClose = timeToMin(bh.close_time);
       if (bOpen == null || bClose == null || bOpen + duration > bClose) continue;
 
       const booked = bookedByDayBarber.get(`${dateStr}|${bId}`) || [];
