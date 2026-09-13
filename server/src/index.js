@@ -24,6 +24,7 @@ import reviewsRoutes from './routes/reviews.js';
 import paymentsRoutes from './routes/payments.js';
 import reportsRoutes from './routes/reports.js';
 import dashboardRoutes from './routes/dashboard.js';
+import analyticsRoutes from './routes/analytics.js';
 import settingsRoutes from './routes/settings.js';
 import publicRoutes from './routes/public.js';
 import uploadRoutes from './routes/upload.js';
@@ -83,6 +84,7 @@ app.use('/api/reviews', reviewsRoutes);
 app.use('/api', paymentsRoutes); // /payments, /financial/summary
 app.use('/api/reports', reportsRoutes);
 app.use('/api/dashboard', dashboardRoutes);
+app.use('/api/dashboard', analyticsRoutes);
 app.use('/api/settings', settingsRoutes);
 app.use('/api/upload', uploadRoutes);
 
