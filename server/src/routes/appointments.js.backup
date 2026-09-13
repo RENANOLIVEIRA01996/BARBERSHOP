@@ -1,0 +1,225 @@
+/**
+ * Agendamentos — CRUD completo com proteção contra conflito de horário
+ * feita no backend/banco (transação + índice único).
+ */
+import express from 'express';
+import { db, runTransaction } from '../db.js';
+import { ok, fail, getWorkingWindow, getBlocksFor, getBookedSlots, timeToMin, minToTime, genCode } from '../utils.js';
+import { requireAuth } from '../middleware/auth.js';
+
+const router = express.Router();
+router.use(requireAuth);
+
+const JOIN = `
+  SELECT a.*, c.name AS customer_name, c.whatsapp AS customer_whatsapp, c.email AS customer_email,
+         s.name AS service_name, s.duration_minutes AS service_duration,
+         b.name AS barber_name
+  FROM appointments a
+  JOIN customers c ON c.id = a.customer_id
+  JOIN services s ON s.id = a.service_id
+  LEFT JOIN barbers b ON b.id = a.barber_id
+`;
+
+// GET /api/appointments?date=YYYY-MM-DD&from=&to=&status=&barber_id=
+router.get('/', (req, res) => {
+  const { date, from, to, status, barber_id } = req.query;
+  const sql = [];
+  const params = [];
+  if (date) { sql.push('a.date = ?'); params.push(date); }
+  if (from) { sql.push('a.date >= ?'); params.push(from); }
+  if (to) { sql.push('a.date <= ?'); params.push(to); }
+  if (status) { sql.push('a.status = ?'); params.push(status); }
+  if (barber_id) { sql.push('a.barber_id = ?'); params.push(Number(barber_id)); }
+  const where = sql.length ? 'WHERE ' + sql.join(' AND ') : '';
+  const rows = db.prepare(`${JOIN} ${where} ORDER BY a.date ASC, a.start_time ASC`).all(...params);
+  return ok(res, { appointments: rows });
+});
+
+// GET /api/appointments/:id
+router.get('/:id', (req, res) => {
+  const appt = db.prepare(`${JOIN} WHERE a.id = ?`).get(req.params.id);
+  if (!appt) return fail(res, 'Agendamento não encontrado.', 404);
+  return ok(res, { appointment: appt });
+});
+
+// POST /api/appointments — criar (via painel)
+router.post('/', (req, res) => {
+  const { customer_id, service_id, barber_id, date, start_time, value, payment_method, notes, status } = req.body || {};
+  const appt = createAppointment({
+    customer_id: Number(customer_id),
+    service_id: Number(service_id),
+    barber_id: barber_id ? Number(barber_id) : null,
+    date, start_time, value, payment_method, notes, status,
+  });
+  if (appt.error) return fail(res, appt.error, appt.status || 409);
+// PUT /api/appointments/:id — editar / remarcar (protege conflito)
+router.put('/:id', (req, res) => {
+  const existing = db.prepare('SELECT * FROM appointments WHERE id = ?').get(req.params.id);
+  if (!existing) return fail(res, 'Agendamento não encontrado.', 404);
+
+  const date = req.body.date !== undefined ? req.body.date : existing.date;
+  const start_time = req.body.start_time !== undefined ? req.body.start_time : existing.start_time;
+  const barber_id = req.body.barber_id !== undefined
+    ? (req.body.barber_id === null ? null : Number(req.body.barber_id))
+    : existing.barber_id;
+  const service_id = req.body.service_id !== undefined ? Number(req.body.service_id) : existing.service_id;
+
+  if (date !== existing.date || start_time !== existing.start_time ||
+      service_id !== existing.service_id || barber_id !== existing.barber_id) {
+    const svc = db.prepare('SELECT * FROM services WHERE id = ?').get(service_id);
+    if (!svc) return fail(res, 'Serviço inválido.');
+    const end = minToTime(timeToMin(start_time) + svc.duration_minutes);
+    if (!isSlotFree(date, start_time, end, barber_id, existing.id)) {
+      return fail(res, 'Este horário não está mais disponível.', 409);
+    }
+  }
+
+  const svc = db.prepare('SELECT * FROM services WHERE id = ?').get(service_id);
+  const end_time = minToTime(timeToMin(start_time) + svc.duration_minutes);
+  const value = req.body.value !== undefined ? Number(req.body.value) : svc.price;
+  const status = req.body.status !== undefined ? req.body.status : existing.status;
+
+  db.prepare(`
+    UPDATE appointments SET customer_id = ?, service_id = ?, barber_id = ?, date = ?,
+      start_time = ?, end_time = ?, value = ?, status = ?,
+      payment_method = ?, notes = ?, updated_at = datetime('now') WHERE id = ?
+  `).run(
+    req.body.customer_id !== undefined ? Number(req.body.customer_id) : existing.customer_id,
+    service_id, barber_id, date, start_time, end_time, value, status,
+    req.body.payment_method !== undefined ? req.body.payment_method : existing.payment_method,
+    req.body.notes !== undefined ? req.body.notes : existing.notes,
+    existing.id
+  );
+
+  syncPayment(existing.id, req.body.payment_method !== undefined ? req.body.payment_method : existing.payment_method, value);
+
+  const full = db.prepare(`${JOIN} WHERE a.id = ?`).get(existing.id);
+  return ok(res, { appointment: full });
+});
+
+// PATCH /api/appointments/:id/status — confirmar/concluir/cancelar/etc
+router.patch('/:id/status', (req, res) => {
+  const { status } = req.body || {};
+  const allowed = ['scheduled', 'confirmed', 'in_progress', 'completed', 'cancelled', 'no_show'];
+  if (!allowed.includes(status)) return fail(res, 'Status inválido.');
+
+  const appt = db.prepare('SELECT * FROM appointments WHERE id = ?').get(req.params.id);
+  if (!appt) return fail(res, 'Agendamento não encontrado.', 404);
+
+  runTransaction(() => {
+    db.prepare('UPDATE appointments SET status = ?, updated_at = datetime(\'now\') WHERE id = ?').run(status, appt.id);
+    const pay = db.prepare('SELECT id FROM payments WHERE appointment_id = ?').get(appt.id);
+    if (status === 'completed') {
+      if (pay) db.prepare('UPDATE payments SET status = ? WHERE appointment_id = ?').run('paid', appt.id);
+      else db.prepare('INSERT INTO payments (appointment_id, method, value, status, date) VALUES (?, ?, ?, ?, ?)').run(appt.id, appt.payment_method || 'pix', appt.value, 'paid', appt.date);
+    } else if (status === 'cancelled') {
+      db.prepare('DELETE FROM payments WHERE appointment_id = ?').run(appt.id);
+    }
+  });
+
+  if (status === 'completed') updateCustomerStats(appt.customer_id, appt.date);
+
+  const full = db.prepare(`${JOIN} WHERE a.id = ?`).get(appt.id);
+  return ok(res, { appointment: full });
+});
+
+// DELETE /api/appointments/:id
+router.delete('/:id', (req, res) => {
+  const appt = db.prepare('SELECT * FROM appointments WHERE id = ?').get(req.params.id);
+  if (!appt) return fail(res, 'Agendamento não encontrado.', 404);
+  runTransaction(() => {
+    db.prepare('DELETE FROM payments WHERE appointment_id = ?').run(appt.id);
+    db.prepare('DELETE FROM appointments WHERE id = ?').run(appt.id);
+  });
+  updateCustomerStats(appt.customer_id);
+});
+// ================== Lógica compartilhada ==================
+
+export function createAppointment({ customer_id, service_id, barber_id, date, start_time, value, payment_method, notes, status }) {
+  const svc = db.prepare('SELECT * FROM services WHERE id = ? AND status = ?').get(service_id, 'active');
+  if (!svc) return { error: 'Serviço inválido ou inativo.' };
+  if (!customer_id) return { error: 'Cliente é obrigatório.' };
+  const cust = db.prepare('SELECT * FROM customers WHERE id = ?').get(customer_id);
+  if (!cust) return { error: 'Cliente não encontrado.' };
+
+  if (barber_id) {
+    const barber = db.prepare('SELECT * FROM barbers WHERE id = ? AND status = ?').get(barber_id, 'active');
+    if (!barber) return { error: 'Barbeiro inválido ou inativo.' };
+  }
+
+  const win = getWorkingWindow(date, barber_id);
+  if (!win) return { error: 'A barbearia está fechada nesta data.' };
+  const start = timeToMin(start_time);
+  const end = start + svc.duration_minutes;
+  if (start < timeToMin(win.open) || end > timeToMin(win.close)) {
+    return { error: 'Horário fora do expediente.' };
+  }
+  const blocks = getBlocksFor(date);
+  const overlapped = blocks.some(b => timesOverlap(start_time, minToTime(end), b.start_time, b.end_time));
+  if (overlapped) return { error: 'Horário bloqueado ou dia de folga. Escolha outro.' };
+
+  const price = value !== undefined && value !== null ? Number(value) : svc.price;
+  let insertedId = null;
+
+  runTransaction(() => {
+    // Proteção crítica: verificação de conflito dentro da transação.
+    if (!isSlotFree(date, start_time, minToTime(end), barber_id)) {
+      throw Object.assign(new Error('Este horário acabou de ser ocupado por outro cliente. Escolha outro.'), { conflict: true });
+    }
+    const r = db.prepare(`
+      INSERT INTO appointments (code, customer_id, service_id, barber_id, date, start_time, end_time, value, status, payment_method, notes)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    `).run(genCode(), customer_id, service_id, barber_id, date, start_time, minToTime(end), price, status || 'scheduled', payment_method || null, notes || null);
+    insertedId = Number(r.lastInsertRowid);
+
+    if (payment_method) {
+      db.prepare('INSERT INTO payments (appointment_id, method, value, status, date) VALUES (?, ?, ?, ?, ?)')
+        .run(insertedId, payment_method, price, status === 'completed' ? 'paid' : 'pending', date);
+    }
+  });
+
+  if (insertedId) updateCustomerStats(customer_id);
+  return { id: insertedId };
+}
+
+export function isSlotFree(date, start, end, barberId, excludeId = null) {
+  if (!barberId) return true;
+  const booked = getBookedSlots(date, barberId, excludeId);
+  return !booked.some(b => timesOverlap(start, end, b.start_time, b.end_time));
+}
+
+export function timesOverlap(s1, e1, s2, e2) {
+  return timeToMin(s1) < timeToMin(e2) && timeToMin(e1) > timeToMin(s2);
+}
+
+export function updateCustomerStats(customerId) {
+  const agg = db.prepare(`
+    SELECT COUNT(CASE WHEN status = 'completed' THEN 1 END) AS visits,
+           COALESCE(SUM(CASE WHEN status = 'completed' THEN value ELSE 0 END), 0) AS spent,
+           MIN(CASE WHEN status = 'completed' THEN date END) AS first,
+           MAX(CASE WHEN status = 'completed' THEN date END) AS last
+    FROM appointments WHERE customer_id = ?
+  `).get(customerId);
+  db.prepare(`
+    UPDATE customers SET visits_count = ?, total_spent = ?,
+      first_visit_at = ?, last_visit_at = ?, updated_at = datetime('now') WHERE id = ?
+  `).run(agg.visits, agg.spent, agg.first, agg.last, customerId);
+}
+
+function syncPayment(apptId, method, value) {
+  const pay = db.prepare('SELECT id FROM payments WHERE appointment_id = ?').get(apptId);
+  if (pay) {
+    if (method) db.prepare('UPDATE payments SET method = ?, value = ? WHERE appointment_id = ?').run(method, value, apptId);
+    else db.prepare('DELETE FROM payments WHERE appointment_id = ?').run(apptId);
+  } else if (method) {
+    db.prepare('INSERT INTO payments (appointment_id, method, value, status, date) VALUES (?, ?, ?, ?)')
+      .run(apptId, method, value, 'pending', new Date().toISOString().slice(0, 10));
+  }
+}
+
+export default router;
+  return ok(res, { deleted: true });
+});
+  const full = db.prepare(`${JOIN} WHERE a.id = ?`).get(appt.id);
+  return ok(res, { appointment: full });
+});

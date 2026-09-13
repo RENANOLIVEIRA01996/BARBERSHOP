@@ -1,0 +1,21 @@
+{
+  "name": "henrique-barber-web",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Frontend oficial do HENRIQUE BARBER — agendamento e página pública (porta 5174)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --port 5174 --strictPort",
+    "build": "vite build",
+    "preview": "vite preview --port 5174 --strictPort"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "react-router-dom": "^6.26.2"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.1",
+    "vite": "^5.4.6"
+  }
+}
