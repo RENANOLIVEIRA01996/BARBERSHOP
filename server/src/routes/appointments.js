@@ -93,9 +93,10 @@ router.post('/', async (req, res) => {
   return ok(res, { appointment: full });
 });
 // PUT /api/appointments/:id — editar / remarcar (protege conflito)
-router.put('/:id', (req, res) => {
-  const existing = db.prepare('SELECT * FROM appointments WHERE id = ?').get(req.params.id);
-  if (!existing) return fail(res, 'Agendamento não encontrado.', 404);
+router.put('/:id', async (req, res) => {
+  const existingResult = await db.query('SELECT * FROM appointments WHERE id = $1', [req.params.id]);
+  if (existingResult.rowCount === 0) return fail(res, 'Agendamento não encontrado.', 404);
+  const existing = existingResult.rows[0];
 
   const {
     date = existing.date,
@@ -116,74 +117,81 @@ router.put('/:id', (req, res) => {
     (barber_id ?? null) !== (existing.barber_id ?? null);
 
   if (needsConflictCheck) {
-    const svc = db.prepare('SELECT * FROM services WHERE id = ?').get(Number(service_id));
-    if (!svc) return fail(res, 'Serviço inválido.', 400);
+    const svcResult = await db.query('SELECT * FROM services WHERE id = $1', [Number(service_id)]);
+    if (svcResult.rowCount === 0) return fail(res, 'Serviço inválido.', 400);
+    const svc = svcResult.rows[0];
 
     const end_time = minToTime(timeToMin(start_time) + svc.duration_minutes);
-    const conflictCheck = isSlotFree(date, start_time, end_time, Number(barber_id) ?? null, Number(req.params.id));
+    const conflictCheck = await isSlotFree(date, start_time, end_time, Number(barber_id) ?? null, Number(req.params.id));
     if (!conflictCheck.available) {
       return fail(res, conflictCheck.error || 'Este horário não está mais disponível.', 409);
     }
   }
 
-  let updatedId = null;
-  runTransaction(() => {
-    const result = db.prepare(`
+  await runTransaction(async () => {
+    const result = await db.query(`
       UPDATE appointments SET
-        date = ?, start_time = ?, service_id = ?, barber_id = ?, value = ?,
-        payment_method = ?, notes = ?, status = ?, updated_at = datetime('now')
-      WHERE id = ?
-    `).run(
+        date = $1, start_time = $2, service_id = $3, barber_id = $4, value = $5,
+        payment_method = $6, notes = $7, status = $8, updated_at = NOW()
+      WHERE id = $9
+    `, [
       date, start_time, Number(service_id),
       barber_id ?? null, value, payment_method, notes, status, Number(req.params.id)
-    );
+    ]);
 
-    if (result.changes === 0) throw new Error('Falha ao atualizar agendamento');
-    updatedId = Number(req.params.id);
+    if (result.rowCount === 0) throw new Error('Falha ao atualizar agendamento');
 
     // Atualizar pagamento se necessário
     if (payment_method !== undefined && payment_method !== null) {
-      const pay = db.prepare('SELECT id FROM payments WHERE appointment_id = ?').get(Number(req.params.id));
-      if (pay) {
-        db.prepare('UPDATE payments SET method = ?, value = ?, status = ? WHERE appointment_id = ?')
-          .run(payment_method, value, status === 'completed' ? 'paid' : 'pending', Number(req.params.id));
+      const payResult = await db.query('SELECT id FROM payments WHERE appointment_id = $1', [Number(req.params.id)]);
+      if (payResult.rowCount > 0) {
+        await db.query(
+          'UPDATE payments SET method = $1, value = $2, status = $3 WHERE appointment_id = $4',
+          [payment_method, value, status === 'completed' ? 'paid' : 'pending', Number(req.params.id)]
+        );
       } else if (payment_method) {
-        db.prepare('INSERT INTO payments (appointment_id, method, value, status, date) VALUES (?, ?, ?, ?, ?)')
-          .run(Number(req.params.id), payment_method, value, status === 'completed' ? 'paid' : 'pending', date);
+        await db.query(`
+          INSERT INTO payments (appointment_id, method, value, status, date)
+          VALUES ($1, $2, $3, $4, $5)
+        `, [
+          Number(req.params.id),
+          payment_method,
+          value,
+          status === 'completed' ? 'paid' : 'pending',
+          date
+        ]);
       }
     }
 
     // Atualizar estatísticas do cliente se o status for concluído
     if (status === 'completed') {
-      updateCustomerStats(existing.customer_id);
+      await updateCustomerStats(existing.customer_id);
     }
   });
 
-  if (updatedId === null) {
-    return fail(res, 'Falha ao atualizar agendamento.', 500);
-  }
-
-  const updated = db.prepare(`${JOIN} WHERE a.id = ?`).get(updatedId);
-  return ok(res, { appointment: updated });
+  const updatedResult = await db.query(`${JOIN} WHERE a.id = $1`, [Number(req.params.id)]);
+  if (updatedResult.rowCount === 0) return fail(res, 'Falha ao atualizar agendamento.', 500);
+  return ok(res, { appointment: updatedResult.rows[0] });
 });
 
 // DELETE /api/appointments/:id
-router.delete('/:id', (req, res) => {
-  const existing = db.prepare('SELECT * FROM appointments WHERE id = ?').get(req.params.id);
-  if (!existing) return fail(res, 'Agendamento não encontrado.', 404);
+router.delete('/:id', async (req, res) => {
+  const existingResult = await db.query('SELECT * FROM appointments WHERE id = $1', [req.params.id]);
+  if (existingResult.rowCount === 0) return fail(res, 'Agendamento não encontrado.', 404);
+  const existing = existingResult.rows[0];
 
-  runTransaction(() => {
-    db.prepare('DELETE FROM payments WHERE appointment_id = ?').run(Number(req.params.id));
-    const result = db.prepare('DELETE FROM appointments WHERE id = ?').run(Number(req.params.id));
-    if (result.changes === 0) throw new Error('Falha ao excluir agendamento');
-    updateCustomerStats(existing.customer_id);
+  await runTransaction(async () => {
+    await db.query('DELETE FROM payments WHERE appointment_id = $1', [Number(req.params.id)]);
+    const result = await db.query('DELETE FROM appointments WHERE id = $1', [Number(req.params.id)]);
+    if (result.rowCount === 0) throw new Error('Falha ao excluir agendamento');
+    await updateCustomerStats(existing.customer_id);
   });
 
   return ok(res, { deleted: true, id: Number(req.params.id) });
 });
 
 // PATCH /api/appointments/:id/status — mudar apenas o status
-router.patch('/:id/status', (req, res) => {
+router.patch('/:id/status', async (req, res) => {
   const { status } = req.body;
   if (!status) return fail(res, 'Status é obrigatório.');
 
@@ -192,49 +200,61 @@ router.patch('/:id/status', (req, res) => {
     return fail(res, 'Status inválido.');
   }
 
-  const existing = db.prepare('SELECT * FROM appointments WHERE id = ?').get(req.params.id);
-  if (!existing) return fail(res, 'Agendamento não encontrado.', 404);
+  const existingResult = await db.query('SELECT * FROM appointments WHERE id = $1', [req.params.id]);
+  if (existingResult.rowCount === 0) return fail(res, 'Agendamento não encontrado.', 404);
+  const existing = existingResult.rows[0];
 
-  runTransaction(() => {
-    const result = db.prepare(
-      "UPDATE appointments SET status = ?, updated_at = datetime('now') WHERE id = ?"
-    ).run(status, Number(req.params.id));
+  await runTransaction(async () => {
+    const result = await db.query(
+      "UPDATE appointments SET status = $1, updated_at = NOW() WHERE id = $2",
+      [status, Number(req.params.id)]
+    );
 
-    if (result.changes === 0) throw new Error('Falha ao atualizar status');
+    if (result.rowCount === 0) throw new Error('Falha ao atualizar status');
 
     // Se concluído, atualizar estatísticas e pagamento
     if (status === 'completed' && existing.status !== 'completed') {
-      updateCustomerStats(existing.customer_id);
-      const pay = db.prepare('SELECT id FROM payments WHERE appointment_id = ?').get(Number(req.params.id));
-      if (pay) {
-        db.prepare("UPDATE payments SET status = 'paid' WHERE appointment_id = ?").run(Number(req.params.id));
+      await updateCustomerStats(existing.customer_id);
+      const payResult = await db.query('SELECT id FROM payments WHERE appointment_id = $1', [Number(req.params.id)]);
+      if (payResult.rowCount > 0) {
+        await db.query("UPDATE payments SET status = 'paid' WHERE appointment_id = $1", [Number(req.params.id)]);
+      }
+    }
+    // Se estava concluído e agora não está mais, reverter estatísticas
+    else if (existing.status === 'completed' && status !== 'completed') {
+      await updateCustomerStats(existing.customer_id);
+      const payResult = await db.query('SELECT id FROM payments WHERE appointment_id = $1', [Number(req.params.id)]);
+      if (payResult.rowCount > 0) {
+        await db.query("UPDATE payments SET status = 'pending' WHERE appointment_id = $1", [Number(req.params.id)]);
       }
     }
   });
 
-  const updated = db.prepare(`${JOIN} WHERE a.id = ?`).get(Number(req.params.id));
-  return ok(res, { appointment: updated });
+  const updatedResult = await db.query(`${JOIN} WHERE a.id = $1`, [Number(req.params.id)]);
+  if (updatedResult.rowCount === 0) return fail(res, 'Falha ao atualizar agendamento.', 500);
+  return ok(res, { appointment: updatedResult.rows[0] });
 });
 // ---------------------------------------------------------------
 // Função de criação usada pelo painel e pela API pública
 // ---------------------------------------------------------------
-export function createAppointment(data) {
+export async function createAppointment(data) {
   const { customer_id, service_id, barber_id, date, start_time, value, payment_method, notes, status } = data;
 
   // Validações
-  const customer = db.prepare('SELECT * FROM customers WHERE id = ?').get(customer_id);
-  if (!customer) return { error: 'Cliente não encontrado.', status: 400 };
+  const customerResult = await db.query('SELECT * FROM customers WHERE id = $1', [customer_id]);
+  if (customerResult.rowCount === 0) return { error: 'Cliente não encontrado.', status: 400 };
 
-  const service = db.prepare('SELECT * FROM services WHERE id = ?').get(service_id);
-  if (!service) return { error: 'Serviço não encontrado.', status: 400 };
+  const serviceResult = await db.query('SELECT * FROM services WHERE id = $1', [service_id]);
+  if (serviceResult.rowCount === 0) return { error: 'Serviço não encontrado.', status: 400 };
+  const service = serviceResult.rows[0];
 
   if (barber_id) {
-    const barber = db.prepare('SELECT * FROM barbers WHERE id = ?').get(barber_id);
-    if (!barber) return { error: 'Barbeiro não encontrado.', status: 400 };
+    const barberResult = await db.query('SELECT * FROM barbers WHERE id = $1', [barber_id]);
+    if (barberResult.rowCount === 0) return { error: 'Barbeiro não encontrado.', status: 400 };
   }
 
   // Verificar horário de funcionamento
-  const win = getWorkingWindow(date, barber_id ?? null);
+  const win = await getWorkingWindow(date, barber_id ?? null);
   if (!win) return { error: 'Barbearia fechada nesta data.', status: 400 };
 
   const startMin = timeToMin(start_time);
@@ -247,7 +267,7 @@ export function createAppointment(data) {
   }
 
   // Verificar bloqueios
-  const blocks = getBlocksFor(date);
+  const blocks = await getBlocksFor(date);
   const blocked = blocks.some(b => {
     const blockStart = timeToMin(b.start_time);
     const blockEnd = timeToMin(b.end_time);
@@ -257,15 +277,15 @@ export function createAppointment(data) {
 
   let insertedId = null;
   try {
-    runTransaction(() => {
+    await runTransaction(async () => {
       // Verificação final de conflito dentro da transação
-      const existing = db.prepare(`
+      const existingResult = await db.query(`
         SELECT id, start_time, end_time FROM appointments
-        WHERE date = ? AND status NOT IN ('cancelled', 'no_show')
-        AND (? IS NULL OR barber_id = ?)
-      `).all(date, barber_id ?? null, barber_id);
+        WHERE date = $1 AND status NOT IN ('cancelled', 'no_show')
+        AND ($2::int IS NULL OR barber_id = $2)
+      `, [date, barber_id ?? null]);
 
-      const conflict = existing.some(appt => {
+      const conflict = existingResult.rows.some(appt => {
         const apptStart = timeToMin(appt.start_time);
         const apptEnd = timeToMin(appt.end_time);
         return startMin < apptEnd && endMin > apptStart;
@@ -275,11 +295,12 @@ export function createAppointment(data) {
         throw Object.assign(new Error('Este horário acabou de ser ocupado por outro cliente.'), { conflict: true });
       }
 
-      const result = db.prepare(`
+      const result = await db.query(`
         INSERT INTO appointments
         (code, customer_id, service_id, barber_id, date, start_time, end_time, value, status, payment_method, notes, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now'))
-      `).run(
+        VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
+        RETURNING id
+      `, [
         genCode(),
         customer_id,
         service_id,
@@ -291,16 +312,16 @@ export function createAppointment(data) {
         status ?? 'scheduled',
         payment_method ?? null,
         notes ?? null
-      );
+      ]);
 
-      insertedId = Number(result.lastInsertRowid);
+      insertedId = Number(result.rows[0].id);
 
       // Criar pagamento se método informado
       if (payment_method) {
-        db.prepare(`
+        await db.query(`
           INSERT INTO payments (appointment_id, method, value, status, date)
-          VALUES (?, ?, ?, ?, ?)
-        `).run(insertedId, payment_method, value ?? service.price, status === 'completed' ? 'paid' : 'pending', date);
+          VALUES ($1, $2, $3, $4, $5)
+        `, [insertedId, payment_method, value ?? service.price, status === 'completed' ? 'paid' : 'pending', date]);
       }
     });
   } catch (err) {
@@ -312,19 +333,19 @@ export function createAppointment(data) {
 
   // Atualizar estatísticas do cliente se for concluído
   if (status === 'completed') {
-    updateCustomerStats(customer_id);
+    await updateCustomerStats(customer_id);
   }
 
   return { id: insertedId };
 }
 
 // Verifica se um horário está livre
-function isSlotFree(date, start_time, end_time, barber_id, exclude_id = null) {
+async function isSlotFree(date, start_time, end_time, barber_id, exclude_id = null) {
   const startMin = timeToMin(start_time);
   const endMin = timeToMin(end_time);
 
   // Verificar horário de funcionamento
-  const win = getWorkingWindow(date, barber_id);
+  const win = await getWorkingWindow(date, barber_id);
   if (!win) return { available: false, error: 'Barbearia fechada nesta data.' };
 
   const openMin = timeToMin(win.open);
@@ -334,7 +355,7 @@ function isSlotFree(date, start_time, end_time, barber_id, exclude_id = null) {
   }
 
   // Verificar bloqueios
-  const blocks = getBlocksFor(date);
+  const blocks = await getBlocksFor(date);
   const blocked = blocks.some(b => {
     const blockStart = timeToMin(b.start_time);
     const blockEnd = timeToMin(b.end_time);
@@ -343,7 +364,7 @@ function isSlotFree(date, start_time, end_time, barber_id, exclude_id = null) {
   if (blocked) return { available: false, error: 'Horário bloqueado ou dia de folga.' };
 
   // Verificar agendamentos existentes
-  const booked = getBookedSlots(date, barber_id, exclude_id);
+  const booked = await getBookedSlots(date, barber_id, exclude_id);
   const overlapped = booked.some(b => {
     const bStart = timeToMin(b.start_time);
     const bEnd = timeToMin(b.end_time);
@@ -355,32 +376,44 @@ function isSlotFree(date, start_time, end_time, barber_id, exclude_id = null) {
 }
 
 // Atualiza estatísticas do cliente
-function updateCustomerStats(customerId) {
-  const stats = db.prepare(`
+async function updateCustomerStats(customerId) {
+  const statsResult = await db.query(`
     SELECT
       COUNT(CASE WHEN status = 'completed' THEN 1 END) AS visit_count,
       COALESCE(SUM(CASE WHEN status = 'completed' THEN value ELSE 0 END), 0) AS total_spent,
       MIN(CASE WHEN status = 'completed' THEN date END) AS first_visit,
       MAX(CASE WHEN status = 'completed' THEN date END) AS last_visit
     FROM appointments
-    WHERE customer_id = ? AND status = 'completed'
-  `).get(customerId);
+    WHERE customer_id = $1 AND status = 'completed'
+  `, [customerId]);
 
-  db.prepare(`
+  if (statsResult.rowCount === 0) return;
+
+  const stats = statsResult.rows[0];
+
+  await db.query(`
     UPDATE customers SET
-      visits_count = ?,
-      total_spent = ?,
-      first_visit_at = ?,
-      last_visit_at = ?,
-      updated_at = datetime('now')
-    WHERE id = ?
-  `).run(
+      visits_count = $1,
+      total_spent = $2,
+      first_visit_at = $3,
+      last_visit_at = $4,
+      updated_at = NOW()
+    WHERE id = $5
+  `, [
     stats.visit_count,
     stats.total_spent,
     stats.first_visit,
     stats.last_visit,
     customerId
-  );
+  ]);
+}
+
+// Busca um agendamento completo pelo código (ou pelo id)
+// Usada pela API pública para responder ao POST /appointments e ao GET /appointments/:code
+export async function fetchAppointmentByCode(code, id = null) {
+  const where = id ? 'a.id = $1' : 'a.code = $1';
+  const { rows } = await db.query(`${JOIN} WHERE ${where}`, [id || code]);
+  return rows[0] || null;
 }
 
 export default router;

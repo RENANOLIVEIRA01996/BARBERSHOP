@@ -7,7 +7,7 @@ import {
   ok, fail, getWorkingWindow, getBlocksFor, getSetting,
   computeAvailableSlots, toYMD, pad, waLink,
 } from '../utils.js';
-import { createAppointment } from './appointments.js';
+import { createAppointment, fetchAppointmentByCode } from './appointments.js';
 
 const router = express.Router();
 

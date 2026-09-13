@@ -126,7 +126,7 @@ router.get('/charts', async (req, res) => {
 
 // GET /api/dashboard/notifications
 router.get('/notifications', async (req, res) => {
-  const { rows: unreadRows } = await db.query('SELECT COUNT(*) AS n FROM notifications WHERE read = 0');
+  const { rows: unreadRows } = await db.query('SELECT COUNT(*) AS n FROM notifications WHERE "read" = 0');
   const unread = Number(unreadRows[0].n);
   const { rows: list } = await db.query('SELECT * FROM notifications ORDER BY created_at DESC LIMIT 20');
   return ok(res, { unread, notifications: list });
@@ -134,13 +134,13 @@ router.get('/notifications', async (req, res) => {
 
 // PATCH /api/dashboard/notifications/:id/read
 router.patch('/notifications/:id/read', async (req, res) => {
-  await db.query('UPDATE notifications SET read = 1 WHERE id = $1', [req.params.id]);
+  await db.query('UPDATE notifications SET "read" = 1 WHERE id = $1', [req.params.id]);
   return ok(res, { ok: true });
 });
 
 // PATCH /api/dashboard/notifications/read-all
 router.patch('/notifications/read-all', async (req, res) => {
-  await db.query('UPDATE notifications SET read = 1 WHERE read = 0');
+  await db.query('UPDATE notifications SET "read" = 1 WHERE "read" = 0');
   return ok(res, { ok: true });
 });
 

@@ -1,0 +1,21 @@
+[2m11:10:35[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/public/appointments[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+[2m11:10:46[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/public/appointments[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)
+[2m11:11:12[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/public/appointments[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1194:18)
+    at afterConnectMultiple (node:net:1784:7)
+[2m11:11:23[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/public/appointments[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1194:18)
+    at afterConnectMultiple (node:net:1784:7)
+[2m11:12:08[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/public/appointments[39m
+AggregateError [ECONNREFUSED]: 
+    at internalConnectMultiple (node:net:1194:18)
+    at afterConnectMultiple (node:net:1784:7)
+[2m11:16:26[22m [31m[1m[vite][22m[39m [31mhttp proxy error: /api/public/appointments[39m
+Error: read ECONNRESET
+    at TCP.onStreamRead (node:internal/stream_base_commons:216:20)

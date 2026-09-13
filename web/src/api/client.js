@@ -1,5 +1,5 @@
 // API client com suporte a JWT para o painel administrativo.
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3333';
+const API_URL = import.meta.env.VITE_API_URL || '';
 const TOKEN_KEY = 'hb_admin_token';
 const USER_KEY = 'hb_admin_user';
 

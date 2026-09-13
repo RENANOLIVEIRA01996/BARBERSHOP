@@ -69,40 +69,92 @@ router.put('/payments/:id', async (req, res) => {
 
 // GET /api/financial/summary?from=&to=
 router.get('/financial/summary', async (req, res) => {
-  const { from, to } = req.query;
-  const params = [];
-  const conds = ["a.status = 'completed'"];
-  if (from) { conds.push('a.date >= $' + (conds.length + 1)); params.push(from); }
-  if (to) { conds.push('a.date <= $' + (conds.length + 1)); params.push(to); }
+  try {
+    const { from, to } = req.query;
+    
+    // Simple test first
+    const testResult = await db.query('SELECT 1 as test');
+    console.log('Test query result:', testResult.rows);
+    
+    // Revenue query
+    let sql = `
+      SELECT COALESCE(SUM(a.value), 0) AS total, COUNT(*) AS count
+      FROM appointments a
+      WHERE a.status = 'completed'
+    `;
+    const params = [];
+    
+    if (from) {
+      sql += ' AND a.date >= $' + (params.length + 1);
+      params.push(from);
+    }
+    if (to) {
+      sql += ' AND a.date <= $' + (params.length + 1);
+      params.push(to);
+    }
+    
+    console.log('Executing revenue query:', sql, 'with params:', params);
+    const revenueResult = await db.query(sql, params);
+    const revenue = revenueResult.rows[0];
+    console.log('Revenue result:', revenue);
 
-  const revenueResult = await db.query(`
-    SELECT COALESCE(SUM(a.value), 0) AS total, COUNT(*) AS count
-    FROM appointments a WHERE ${conds.join(' AND ')}
-  `, params);
-  const revenue = revenueResult.rows[0];
+    // By method query
+    let methodSql = `
+      SELECT p.method, COALESCE(SUM(p.value), 0) AS total, COUNT(*) AS count
+      FROM payments p 
+      JOIN appointments a ON a.id = p.appointment_id
+      WHERE a.status = 'completed'
+    `;
+    const methodParams = [];
+    
+    if (from) {
+      methodSql += ' AND a.date >= $' + (methodParams.length + 1);
+      methodParams.push(from);
+    }
+    if (to) {
+      methodSql += ' AND a.date <= $' + (methodParams.length + 1);
+      methodParams.push(to);
+    }
+    methodSql += ' GROUP BY p.method ORDER BY total DESC';
+    
+    console.log('Executing method query:', methodSql, 'with params:', methodParams);
+    const byMethodResult = await db.query(methodSql, methodParams);
+    const byMethod = byMethodResult.rows;
+    console.log('ByMethod result:', byMethod);
 
-  const byMethodResult = await db.query(`
-    SELECT p.method, COALESCE(SUM(p.value), 0) AS total, COUNT(*) AS count
-    FROM payments p JOIN appointments a ON a.id = p.appointment_id
-    WHERE ${conds.join(' AND ')}
-    GROUP BY p.method ORDER BY total DESC
-  `, params);
-  const byMethod = byMethodResult.rows;
+    // By day query
+    let daySql = `
+      SELECT a.date, COALESCE(SUM(a.value), 0) AS total, COUNT(*) AS count
+      FROM appointments a
+      WHERE a.status = 'completed'
+    `;
+    const dayParams = [];
+    
+    if (from) {
+      daySql += ' AND a.date >= $' + (dayParams.length + 1);
+      dayParams.push(from);
+    }
+    if (to) {
+      daySql += ' AND a.date <= $' + (dayParams.length + 1);
+      dayParams.push(to);
+    }
+    daySql += ' GROUP BY a.date ORDER BY a.date ASC';
+    
+    console.log('Executing day query:', daySql, 'with params:', dayParams);
+    const byDayResult = await db.query(daySql, dayParams);
+    const byDay = byDayResult.rows;
+    console.log('ByDay result:', byDay);
 
-  const byDayResult = await db.query(`
-    SELECT a.date, COALESCE(SUM(a.value), 0) AS total, COUNT(*) AS count
-    FROM appointments a
-    WHERE ${conds.join(' AND ')}
-    GROUP BY a.date ORDER BY a.date ASC
-  `, params);
-  const byDay = byDayResult.rows;
-
-  return ok(res, {
-    total: revenue.total,
-    count: revenue.count,
-    byMethod,
-    byDay,
-  });
+    return ok(res, {
+      total: revenue.total,
+      count: revenue.count,
+      byMethod,
+      byDay,
+    });
+  } catch (err) {
+    console.error('Error in financial/summary:', err);
+    return fail(res, 'Erro interno ao buscar resumo financeiro.', 500);
+  }
 });
 
 export default router;

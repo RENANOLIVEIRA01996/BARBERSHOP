@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import NavBar from '../components/layout/NavBar';
 import Footer from '../components/layout/Footer';
 
-const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:3333';
+const API_URL = import.meta.env.VITE_API_URL || '';
 
 function pad(n) {
   return String(n).padStart(2, '0');
