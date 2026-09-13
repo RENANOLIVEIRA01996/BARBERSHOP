@@ -79,19 +79,35 @@ export async function setSetting(key, value) {
 /**
  * Janela real de trabalho de um barbeiro em uma data.
  *
- * REGRA: DISPONIBILIDADE = INTERSEÇÃO entre o horário da barbearia
- * (business_hours) e o horário individual do barbeiro (barber_hours).
+ * REGRA DE NEGÓCIO (por escolha explícita):
+ * - Se barber_id for fornecido: disponibilidade segue **exclusivamente** o horário do barbeiro (barber_hours).
+ *   O horário da barbearia (business_hours) é ignorado para fins de disponibilidade individual.
+ * - Se barber_id for nulo/undefined: disponibilidade segue o horário geral da barbearia (business_hours).
  *
- * - Barbearia fechada no dia ou sem valores  -> null (ninguém agenda).
- * - Barbeiro sem registro ativo de horário no dia (ativo=0, sem hora
- *   ou sem linha em barber_hours) -> null (barbeiro não trabalha).
- * - Barbeiro com registro ativo -> interseção dos dois intervalos.
- *   Sem sobreposição -> null.
+ * Regras aplicáveis aos dois casos:
+ * - Sem registro ativo no dia -> null (ninguém agenda ou barbeiro não trabalha).
+ * - Registro ativo mas sem sobreposição (quando aplicável) -> null.
  */
 export async function getWorkingWindow(dateStr, barberId = null) {
   const date = new Date(dateStr + 'T12:00:00');
   const dow = date.getDay();
 
+  if (barberId) {
+    // ---------- BARBEIRO ESPECÍFICO ----------
+    const { rows: barberRows } = await db.query(
+      'SELECT * FROM barber_hours WHERE barber_id = $1 AND day_of_week = $2',
+      [barberId, dow]
+    );
+    const bh = barberRows[0];
+
+    // Barbeiro sem horário ativo configurado no dia = não trabalha
+    if (!bh || !bh.active || !bh.open_time || !bh.close_time) return null;
+
+    // Retorna exatamente o que o barbeiro definiu
+    return { open: bh.open_time, close: bh.close_time };
+  }
+
+  // ---------- GERAL (quando não há barber_id) ----------
   const { rows: shopRows } = await db.query('SELECT * FROM business_hours WHERE day_of_week = $1', [dow]);
   const shop = shopRows[0];
   // Sem registro nenhum (ex.: instalação nova com banco sem seed de horários),
@@ -99,23 +115,7 @@ export async function getWorkingWindow(dateStr, barberId = null) {
   if (!shop) return { open: '08:00', close: '18:00' };
   if (!shop.active || !shop.open_time || !shop.close_time) return null;
 
-  // Sem barbeiro específico -> limite geral da barbearia
-  if (!barberId) return { open: shop.open_time, close: shop.close_time };
-
-  const { rows: barberRows } = await db.query(
-    'SELECT * FROM barber_hours WHERE barber_id = $1 AND day_of_week = $2',
-    [barberId, dow]
-  );
-  const bh = barberRows[0];
-
-  // Barbeiro sem horário ativo configurado no dia = não trabalha
-  if (!bh || !bh.active || !bh.open_time || !bh.close_time) return null;
-
-  // INTERSEÇÃO: o cliente só agenda dentro do que o barbeiro E a barbearia cobrem
-  const openMin = Math.max(timeToMin(shop.open_time), timeToMin(bh.open_time));
-  const closeMin = Math.min(timeToMin(shop.close_time), timeToMin(bh.close_time));
-  if (openMin >= closeMin) return null; // sem sobreposição -> sem atendimento
-  return { open: minToTime(openMin), close: minToTime(closeMin) };
+  return { open: shop.open_time, close: shop.close_time };
 }
 
 export async function getBlocksFor(dateStr) {
@@ -174,8 +174,8 @@ export async function computeAvailableSlots(dateStr, serviceId, barberId = null)
   const blocks = await getBlocksFor(dateStr);
 
   for (const bId of barberIds) {
-    // Janela = INTERSEÇÃO(barber_hours, business_hours) p/ este barbeiro.
-    // Se null -> barbeiro não trabalha neste dia (ou barbearia fechada).
+    // Janela = horário do barbeiro (getWorkingWindow).
+    // Se null -> barbeiro não trabalha neste dia.
     const bWin = await getWorkingWindow(dateStr, bId);
     if (!bWin) continue;
 
@@ -332,16 +332,24 @@ export async function computeAvailableDays(serviceId, barberId = null, days = 60
 
     if (allDayBlockDates.has(dateStr)) continue;
 
-    // Limite geral: business_hours (a barbearia controla o teto máximo)
+    // Limite geral: business_hours (a barbearia controla o teto máximo).
+    // Nota: quando barberId é fornecido, este limite NÃO se aplica ao
+    // barbeiro específico — é usado apenas na consulta geral (sem barberId).
     const shopRow = bhByDow.get(dow);
     let shopOpenMin = 8 * 60;  // bootstrap p/ instalação sem registro de horário
     let shopCloseMin = 18 * 60;
     if (shopRow) {
-      // Existe registro e a barbearia está fechada no dia -> ninguém agenda
-      if (!shopRow.active || !shopRow.open_time || !shopRow.close_time) continue;
-      shopOpenMin = timeToMin(shopRow.open_time);
-      shopCloseMin = timeToMin(shopRow.close_time);
-      if (shopOpenMin == null || shopCloseMin == null) continue;
+      // Existe registro e a barbearia está fechada no dia.
+      // Só pular quando NÃO há barbeiro específico.
+      if (!shopRow.active || !shopRow.open_time || !shopRow.close_time) {
+        if (!barberId) continue;
+      } else {
+        shopOpenMin = timeToMin(shopRow.open_time);
+        shopCloseMin = timeToMin(shopRow.close_time);
+        if (shopOpenMin == null || shopCloseMin == null) {
+          if (!barberId) continue;
+        }
+      }
     }
 
     const dayBlocks = blocksByDate.get(dateStr) || [];
@@ -354,9 +362,19 @@ export async function computeAvailableDays(serviceId, barberId = null, days = 60
       const bh = bMap && bMap.get(dow);
       if (!bh || !bh.active || !bh.open_time || !bh.close_time) continue;
 
-      // INTERSEÇÃO: barbeiro ∩ barbearia
-      const bOpen = Math.max(shopOpenMin, timeToMin(bh.open_time));
-      const bClose = Math.min(shopCloseMin, timeToMin(bh.close_time));
+      // Se temos um barbeiro específico (barberId fornecido na função),
+      // ignoramos o horário da barbearia e usamos exclusivamente o horário do barbeiro.
+      // Caso contrário (consultando disponibilidade geral), respeitamos o horário da barbearia como limite.
+      let bOpen, bClose;
+      if (barberId) {
+        // Barber específico: usar exclusivamente o horário do barbeiro
+        bOpen = timeToMin(bh.open_time);
+        bClose = timeToMin(bh.close_time);
+      } else {
+        // Consulta geral: interseção entre horário do barbeiro e da barbearia
+        bOpen = Math.max(shopOpenMin, timeToMin(bh.open_time));
+        bClose = Math.min(shopCloseMin, timeToMin(bh.close_time));
+      }
       if (bOpen == null || bClose == null || bOpen + duration > bClose) continue;
 
       const booked = bookedByDayBarber.get(`${dateStr}|${bId}`) || [];
