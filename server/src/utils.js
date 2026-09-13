@@ -124,17 +124,25 @@ export async function getBlocksFor(dateStr) {
 
   const { rows: holidayRows } = await db.query('SELECT * FROM holidays WHERE date = $1 OR recurring = 1', [dateStr]);
   for (const h of holidayRows) {
-    if (h.date === dateStr || (h.recurring && new Date(h.date + 'T12:00:00').getDay() === dow)) {
+    const hDate = normalizeDateKey(h.date);
+    if (hDate === dateStr || (h.recurring && new Date(hDate + 'T12:00:00').getDay() === dow)) {
       blocks.push({ title: h.title, allDay: true, start_time: '00:00', end_time: '24:00' });
     }
   }
 
   const { rows: blockedTimesRows } = await db.query('SELECT * FROM blocked_times WHERE date = $1 OR is_recurring = 1', [dateStr]);
   for (const r of blockedTimesRows) {
-    const hit = r.date === dateStr ||
-      (r.is_recurring && new Date(r.date + 'T12:00:00').getDay() === dow);
+    const rDate = normalizeDateKey(r.date);
+    const hit = rDate === dateStr ||
+      (r.is_recurring && new Date(rDate + 'T12:00:00').getDay() === dow);
     if (hit) {
-      blocks.push({ title: r.title, allDay: !!r.all_day, start_time: r.all_day ? '00:00' : r.start_time, end_time: r.all_day ? '24:00' : r.end_time });
+      const allDay = !!r.all_day;
+      blocks.push({
+        title: r.title,
+        allDay,
+        start_time: allDay ? '00:00' : r.start_time,
+        end_time: allDay ? '24:00' : r.end_time,
+      });
     }
   }
   return blocks;
