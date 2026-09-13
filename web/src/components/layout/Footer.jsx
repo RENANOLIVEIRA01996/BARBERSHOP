@@ -9,19 +9,35 @@ function Footer() {
 
   useEffect(() => {
     let cancelled = false;
-    fetch(`${API_URL}/api/public/shop`)
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data) => {
+    const fetchShop = async () => {
+      try {
+        const res = await fetch(`${API_URL}/api/public/shop`);
+        if (!res.ok) return;
+        const data = await res.json();
         if (!cancelled && data?.shop) setShop(data);
-      })
-      .catch(() => {});
+      } catch (e) {
+        console.error(e);
+      }
+    };
+    fetchShop();
+    const interval = setInterval(fetchShop, 5 * 60 * 1000); // 5 minutes
     return () => {
       cancelled = true;
+      clearInterval(interval);
     };
   }, []);
 
   const s = shop?.shop || {};
-  const hours = (shop?.hours || []).filter((h) => h.active);
+  let hours = [];
+  if (shop?.barbers) {
+    const henrique = shop.barbers.find(b => b.id === 1);
+    if (henrique && henrique.hours) {
+      hours = henrique.hours.filter(h => h.active);
+    }
+  }
+  if (!hours.length) {
+    hours = (shop?.hours || []).filter((h) => h.active);
+  }
 
   const timesFor = (days) => {
     const times = hours

@@ -227,8 +227,13 @@ function normalizeDateKey(value) {
  * isso é dezenas de vezes mais rápido que o loop sequencial antigo.
  */
 export async function computeAvailableDays(serviceId, barberId = null, days = 60) {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
+  const now = new Date();
+  // Adjust to Sao Paulo time (UTC-3) to get the current Sao Paulo date
+  const saoPauloNow = new Date(now.getTime() - 3 * 60 * 60 * 1000);
+  const year = saoPauloNow.getUTCFullYear();
+  const month = saoPauloNow.getUTCMonth(); // 0-indexed
+  const day = saoPauloNow.getUTCDate();
+  const today = new Date(Date.UTC(year, month, day, 0, 0, 0, 0));
   const end = new Date(today);
   end.setDate(end.getDate() + (days - 1));
   const todayY = toYMD(today);

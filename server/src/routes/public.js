@@ -68,7 +68,7 @@ router.get('/shop', async (req, res) => {
   `);
   const rating = ratingRows[0];
 
-  const { rows: hours } = await db.query('SELECT * FROM business_hours ORDER BY day_of_week');
+  const { rows: hours } = await db.query('SELECT * FROM barber_hours WHERE barber_id = $1 ORDER BY day_of_week', [1]);
 
   return ok(res, {
     shop, services, barbers, portfolio, reviews,
