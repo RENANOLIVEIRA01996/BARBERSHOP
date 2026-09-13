@@ -10,9 +10,12 @@ function HorariosAdmin() {
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
 
+  // Henrique's barber ID (confirmed from seed.js as the first/only barber)
+  const HENRIQUE_BARBER_ID = 1;
+
   const load = () => {
     setLoading(true);
-    apiGet('/api/hours')
+    apiGet(`/api/hours/barber/${HENRIQUE_BARBER_ID}`)
       .then(d => {
         const base = [0, 1, 2, 3, 4, 5, 6].map(day => {
           const found = (d.hours || []).find(h => h.day_of_week === day);
@@ -36,7 +39,7 @@ function HorariosAdmin() {
     setSaving(true);
     setSaved(false);
     try {
-      await apiPut('/api/hours', { hours });
+      await apiPut(`/api/hours/barber/${HENRIQUE_BARBER_ID}`, { hours });
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } catch (e) {
@@ -52,7 +55,7 @@ function HorariosAdmin() {
     <div className="admin-page">
       <div className="admin-page-head">
         <h1>Horários</h1>
-        <p className="admin-page-sub">Horário de funcionamento da barbearia.</p>
+        <p className="admin-page-sub">Horário de funcionamento do barbeiro Henrique.</p>
       </div>
 
       {error && <div className="alert alert-error">{error}</div>}

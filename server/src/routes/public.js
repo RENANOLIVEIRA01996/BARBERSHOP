@@ -42,7 +42,12 @@ router.get('/shop', async (req, res) => {
 
   const { rows: services } = await db.query('SELECT * FROM services WHERE status = $1 ORDER BY position, name', ['active']);
   const { rows: barbers } = await db.query('SELECT * FROM barbers WHERE status = $1 ORDER BY position, name', ['active']);
-  for (const b of barbers) b.specialties = safeJson(b.specialties, []);
+  // Attach each barber's weekly hours (barber_hours) so the frontend can build per‑barber slot grids
+  for (const b of barbers) {
+    b.specialties = safeJson(b.specialties, []);
+    const { rows: hours } = await db.query('SELECT * FROM barber_hours WHERE barber_id = $1 ORDER BY day_of_week', [b.id]);
+    b.hours = hours;
+  }
 
   const { rows: portfolio } = await db.query(`
     SELECT p.*, s.name AS service_name, b.name AS barber_name

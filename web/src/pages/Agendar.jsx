@@ -153,7 +153,8 @@ function Agendar() {
   const timeSlots = useMemo(() => {
     if (!selectedDate || !shopData) return [];
     const dow = new Date(selectedDate + 'T00:00:00').getDay();
-    const hours = (shopData.hours || []).find(h => Number(h.day_of_week) === dow);
+    const barberHours = (selectedBarber?.hours || []).find(h => Number(h.day_of_week) === dow);
+    const hours = barberHours || (shopData.hours || []).find(h => Number(h.day_of_week) === dow);
     if (!hours || !hours.active || !hours.open_time || !hours.close_time) return [];
 
     const interval = Number(shopData.bookingRules?.slotInterval) || 30;
@@ -170,7 +171,7 @@ function Agendar() {
       });
     }
     return out;
-  }, [selectedDate, shopData, availableSlots]);
+  }, [selectedDate, selectedBarber, shopData, availableSlots]);
 
   // ---- Calendar helpers ----
   const calendarCells = useMemo(() => {
