@@ -89,4 +89,29 @@ export function formatDateTimeBR(v) {
   try { return new Date(v).toLocaleString('pt-BR'); } catch { return v; }
 }
 
+export async function apiUpload(file) {
+    const formData = new FormData();
+    formData.append('file', file);
+
+    const res = await fetch(resolveUrl('/api/upload'), {
+        method: 'POST',
+        headers: {
+            Authorization: `Bearer ${getToken()}`
+        },
+        body: formData
+    });
+
+    let body = null;
+    try { body = await res.json(); } catch { /* sem corpo */ }
+
+    if (res.status === 401 || body?.message === 'Não autorizado.') {
+        clearSession();
+        throw new Error('Sessão expirada. Faça login novamente.');
+    }
+    if (!res.ok || !body?.ok) throw new Error(body?.message || `Erro ${res.status}`);
+
+    // Assuming the upload endpoint returns { ok: true, url: '...' }
+    return body.url;
+}
+
 export { API_URL };

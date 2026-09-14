@@ -2987,6 +2987,81 @@ body {
   align-items: center;
 }
 
+/* ---------- upload de foto do serviço (admin) ---------- */
+.service-photo-upload {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.75rem;
+}
+
+.service-photo-add {
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 44px; /* área de toque confortável no celular */
+  margin-top: 0.25rem;
+}
+
+.service-photo-add .file-input,
+.service-photo-actions .file-input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.service-photo-preview-wrap {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+  width: 100%;
+  max-width: 320px;
+}
+
+.service-photo-preview {
+  width: 100%;
+  height: 200px;
+  object-fit: cover;
+  border-radius: 12px;
+  border: 1px solid var(--bg-tertiary);
+  background: #111;
+}
+
+.service-photo-actions {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.service-photo-actions label {
+  cursor: pointer;
+  margin-bottom: 0;
+}
+
+.admin-service-photo-cell {
+  width: 64px;
+}
+
+.admin-service-photo-thumb {
+  width: 56px;
+  height: 44px;
+  object-fit: cover;
+  border-radius: 8px;
+  border: 1px solid var(--bg-tertiary);
+  display: block;
+}
+
+.admin-service-photo-empty {
+  color: var(--text-muted);
+  opacity: 0.5;
+}
+
 /* ---------- agenda / listas ---------- */
 .agenda-list {
   display: flex;

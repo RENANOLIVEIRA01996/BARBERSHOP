@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { apiGet, apiPost, apiPut, apiDelete, formatMoney } from '../../api/client';
+import { apiGet, apiPost, apiPut, apiDelete, apiUpload, formatMoney, mediaUrl } from '../../api/client';
 
 function ServicosAdmin() {
   const [items, setItems] = useState([]);
@@ -7,6 +7,8 @@ function ServicosAdmin() {
   const [error, setError] = useState(null);
   const [editing, setEditing] = useState(null); // null = fechado, {}=novo, obj=editar
   const [form, setForm] = useState({});
+  const [imagePreview, setImagePreview] = useState(null);
+  const [imageFile, setImageFile] = useState(null);
   const [saving, setSaving] = useState(false);
 
   const load = () => {
@@ -22,21 +24,54 @@ function ServicosAdmin() {
   const openNew = () => {
     setEditing({});
     setForm({ name: '', description: '', price: '', duration_minutes: '', status: 'active' });
+    setImagePreview(null);
+    setImageFile(null);
   };
 
   const openEdit = (item) => {
     setEditing(item);
     setForm({ ...item });
+    if (item.photo) {
+      setImagePreview(mediaUrl(item.photo));
+      setImageFile(null); // we don't have the file content, just the URL for preview
+    } else {
+      setImagePreview(null);
+      setImageFile(null);
+    }
+  };
+
+  const handleImageChange = (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    setImageFile(file);
+    const preview = URL.createObjectURL(file);
+    setImagePreview(preview);
+    // Permite escolher o mesmo arquivo novamente em trocas subsequentes
+    e.target.value = '';
+  };
+
+  const handleImageRemove = () => {
+    setImageFile(null);
+    setImagePreview(null);
   };
 
   const handleSave = async () => {
     setSaving(true);
     setError(null);
     try {
+      // Se o usuário escolheu um novo arquivo, sobe a imagem e pega a URL pública
+      let photo = form.photo || null;
+      if (imageFile) {
+        photo = await apiUpload(imageFile); // ex.: /uploads/123-456.png
+      } else if (imagePreview === null) {
+        photo = null; // usuário removeu a foto
+      }
+
       const payload = {
         ...form,
         price: Number(form.price),
         duration_minutes: Number(form.duration_minutes),
+        photo,
       };
       if (editing.id) {
         await apiPut(`/api/services/${editing.id}`, payload);
@@ -101,6 +136,29 @@ function ServicosAdmin() {
                 <option value="inactive">Inativo</option>
               </select>
             </div>
+
+            <div className="form-group" style={{ gridColumn: '1 / -1' }}>
+              <label>Foto do serviço</label>
+              <div className="service-photo-upload">
+                {imagePreview ? (
+                  <div className="service-photo-preview-wrap">
+                    <img src={imagePreview} alt="Prévia da foto" className="service-photo-preview" />
+                    <div className="service-photo-actions">
+                      <label className="btn-outline btn-sm">
+                        Trocar foto
+                        <input type="file" accept="image/*" className="file-input" onChange={handleImageChange} />
+                      </label>
+                      <button className="btn-danger btn-sm" onClick={handleImageRemove}>Remover</button>
+                    </div>
+                  </div>
+                ) : (
+                  <label className="btn-hero btn-sm service-photo-add">
+                    <span>Adicionar foto</span>
+                    <input type="file" accept="image/*" className="file-input" onChange={handleImageChange} />
+                  </label>
+                )}
+              </div>
+            </div>
           </div>
           <div className="form-actions">
             <button className="btn-primary" onClick={handleSave} disabled={saving}>{saving ? 'Salvando…' : 'Salvar'}</button>
@@ -117,6 +175,7 @@ function ServicosAdmin() {
             <table className="admin-table">
               <thead>
                 <tr>
+                  <th>Foto</th>
                   <th>Nome</th>
                   <th>Duração</th>
                   <th>Preço</th>
@@ -128,6 +187,13 @@ function ServicosAdmin() {
               <tbody>
                 {items.map(s => (
                   <tr key={s.id}>
+                    <td className="admin-service-photo-cell">
+                      {s.photo ? (
+                        <img src={mediaUrl(s.photo)} alt={s.name} className="admin-service-photo-thumb" />
+                      ) : (
+                        <span className="admin-service-photo-empty">—</span>
+                      )}
+                    </td>
                     <td><strong>{s.name}</strong></td>
                     <td>{s.duration_minutes} min</td>
                     <td className="gold">{formatMoney(s.price)}</td>
